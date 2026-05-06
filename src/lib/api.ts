@@ -1,8 +1,8 @@
 import type { Capabilities, Job } from "./types";
 
 function withBase(baseUrl: string, path: string): string {
-    const base = String(baseUrl || "").trim().replace(/\/+$/, "");
-    return base ? `${base}${path}` : path;
+    const base = String(baseUrl || window.location.pathname).trim().replace(/\/+$/, "");
+    return `${base}${path}`;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
