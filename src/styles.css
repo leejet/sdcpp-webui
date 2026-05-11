@@ -791,13 +791,15 @@ button {
 
 .list-editor {
     display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(96px, 0.8fr) auto auto;
     gap: 10px;
     min-width: 0;
 }
 
 .list-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) minmax(96px, 0.8fr) auto auto;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
     gap: 10px;
     align-items: center;
     min-width: 0;
@@ -815,7 +817,7 @@ button {
 }
 
 .list-row__checkbox {
-    justify-self: center;
+    justify-self: start;
 }
 
 .checkbox {
