@@ -158,6 +158,7 @@ export function buildVideoRequestBody(form: GenerationForm) {
         init_image: form.init_image ? form.init_image.dataUrl : null,
         end_image: form.end_image ? form.end_image.dataUrl : null,
         control_frames: form.control_frames.map((item) => item.dataUrl),
+        ref_images: form.ref_images.map((item) => item.dataUrl),
         high_noise_sample_params: buildSampleParams(form.high_noise_sample_params, -1),
     };
 }
