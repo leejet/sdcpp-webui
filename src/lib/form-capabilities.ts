@@ -58,11 +58,11 @@ export function formFromCapabilities(capabilities: Capabilities): GenerationForm
     assignSampleParams(form.high_noise_sample_params, highNoiseSample, -1);
 
     form.vae_tiling_params.enabled = Boolean(tiling.enabled);
-    form.vae_tiling_params.tile_size_x = finiteOrFallback(tiling.tile_size_x, 0);
-    form.vae_tiling_params.tile_size_y = finiteOrFallback(tiling.tile_size_y, 0);
+    form.vae_tiling_params.tile_size_w = finiteOrFallback(tiling.tile_size_w, 0);
+    form.vae_tiling_params.tile_size_h = finiteOrFallback(tiling.tile_size_h, 0);
     form.vae_tiling_params.target_overlap = finiteOrFallback(tiling.target_overlap, 0.5);
-    form.vae_tiling_params.rel_size_x = finiteOrFallback(tiling.rel_size_x, 0);
-    form.vae_tiling_params.rel_size_y = finiteOrFallback(tiling.rel_size_y, 0);
+    form.vae_tiling_params.rel_size_w = finiteOrFallback(tiling.rel_size_w, 0);
+    form.vae_tiling_params.rel_size_h = finiteOrFallback(tiling.rel_size_h, 0);
 
     form.cache.mode = defaults.cache_mode || "disabled";
     form.cache.option = defaults.cache_option || "";

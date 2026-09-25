@@ -70,11 +70,11 @@ export function createBlankForm(): GenerationForm {
         lora: [],
         vae_tiling_params: {
             enabled: false,
-            tile_size_x: 0,
-            tile_size_y: 0,
+            tile_size_w: 0,
+            tile_size_h: 0,
             target_overlap: 0.5,
-            rel_size_x: 0,
-            rel_size_y: 0,
+            rel_size_w: 0,
+            rel_size_h: 0,
         },
         cache: {
             mode: "disabled",

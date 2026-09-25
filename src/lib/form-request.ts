@@ -99,11 +99,11 @@ function buildLoraRequest(form: GenerationForm) {
 function buildTilingRequest(form: GenerationForm) {
     return {
         enabled: Boolean(form.vae_tiling_params.enabled),
-        tile_size_x: parseNumber(form.vae_tiling_params.tile_size_x, 0),
-        tile_size_y: parseNumber(form.vae_tiling_params.tile_size_y, 0),
+        tile_size_w: parseNumber(form.vae_tiling_params.tile_size_w, 0),
+        tile_size_h: parseNumber(form.vae_tiling_params.tile_size_h, 0),
         target_overlap: parseNumber(form.vae_tiling_params.target_overlap, 0.5),
-        rel_size_x: parseNumber(form.vae_tiling_params.rel_size_x, 0),
-        rel_size_y: parseNumber(form.vae_tiling_params.rel_size_y, 0),
+        rel_size_w: parseNumber(form.vae_tiling_params.rel_size_w, 0),
+        rel_size_h: parseNumber(form.vae_tiling_params.rel_size_h, 0),
     };
 }
 

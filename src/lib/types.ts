@@ -53,11 +53,11 @@ export interface SampleParams {
 
 export interface VaeTilingParams {
   enabled: boolean;
-  tile_size_x: number;
-  tile_size_y: number;
+  tile_size_w: number;
+  tile_size_h: number;
   target_overlap: number;
-  rel_size_x: number;
-  rel_size_y: number;
+  rel_size_w: number;
+  rel_size_h: number;
 }
 
 export interface CacheParams {

@@ -198,7 +198,7 @@ const vaeTilingSummary = computed(() => {
     if (!form.vae_tiling_params.enabled) {
         return "Disabled";
     }
-    return `${form.vae_tiling_params.tile_size_x}×${form.vae_tiling_params.tile_size_y} · overlap ${form.vae_tiling_params.target_overlap}`;
+    return `${form.vae_tiling_params.tile_size_w}×${form.vae_tiling_params.tile_size_h} · overlap ${form.vae_tiling_params.target_overlap}`;
 });
 const cacheSummary = computed(() => {
     const mode = form.cache.mode || "disabled";
@@ -819,13 +819,13 @@ onBeforeUnmount(() => {
                 <CollapsibleSection class="stack-top" eyebrow="VAE Tiling" :summary="vaeTilingSummary" :open="sectionState.vaeTiling" @toggle="toggleSection('vaeTiling')">
                     <label class="checkbox"><input v-model="form.vae_tiling_params.enabled" type="checkbox" /><span>Enabled</span></label>
                     <div class="fields">
-                        <div class="field"><label>Tile Size X</label><input v-model.number="form.vae_tiling_params.tile_size_x" type="number" /></div>
-                        <div class="field"><label>Tile Size Y</label><input v-model.number="form.vae_tiling_params.tile_size_y" type="number" /></div>
+                        <div class="field"><label>Tile Width (px)</label><input v-model.number="form.vae_tiling_params.tile_size_w" type="number" /></div>
+                        <div class="field"><label>Tile Height (px)</label><input v-model.number="form.vae_tiling_params.tile_size_h" type="number" /></div>
                     </div>
                     <div class="field"><label>Target Overlap</label><input v-model.number="form.vae_tiling_params.target_overlap" type="number" step="0.01" /></div>
                     <div class="fields">
-                        <div class="field"><label>Relative Size X</label><input v-model.number="form.vae_tiling_params.rel_size_x" type="number" step="0.01" /></div>
-                        <div class="field"><label>Relative Size Y</label><input v-model.number="form.vae_tiling_params.rel_size_y" type="number" step="0.01" /></div>
+                        <div class="field"><label>Relative Width</label><input v-model.number="form.vae_tiling_params.rel_size_w" type="number" step="0.01" /></div>
+                        <div class="field"><label>Relative Height</label><input v-model.number="form.vae_tiling_params.rel_size_h" type="number" step="0.01" /></div>
                     </div>
                 </CollapsibleSection>
 
