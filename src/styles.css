@@ -306,6 +306,68 @@ button {
     align-items: start;
 }
 
+.history-view {
+    display: grid;
+    gap: 20px;
+}
+
+.history-card {
+    padding: 20px;
+    min-width: 0;
+}
+
+.history-heading {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.history-model {
+    margin: 0 0 8px;
+    font-size: 16px;
+}
+
+.history-summary {
+    flex-shrink: 0;
+}
+
+.history-images {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.history-image {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.history-thumb {
+    aspect-ratio: 1;
+    width: 100%;
+}
+
+.history-image .history-thumb img {
+    object-fit: contain;
+}
+
+.history-download {
+    text-align: center;
+    text-decoration: none;
+}
+
+.history-text,
+.history-parameters {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.history-parameters {
+    font-size: 12px;
+    line-height: 1.6;
+}
+
 .control-panel,
 .output-panel {
     padding: 20px;
@@ -897,6 +959,7 @@ button {
     }
 
     .page-header,
+    .history-card,
     .control-panel,
     .output-panel {
         padding: 16px;
