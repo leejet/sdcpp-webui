@@ -125,6 +125,8 @@ export function buildRequestBody(form: GenerationForm) {
         scm_policy_dynamic: Boolean(form.cache.scm_policy_dynamic),
         output_format: form.output_format,
         output_compression: parseNumber(form.output_compression, 100),
+        preview: form.preview_mode || "none",
+        preview_interval: parseNumber(form.preview_interval, 1),
     };
 
     if (!request.prompt) {

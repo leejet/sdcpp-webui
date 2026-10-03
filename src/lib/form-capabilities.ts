@@ -53,6 +53,8 @@ export function formFromCapabilities(capabilities: Capabilities): GenerationForm
     form.vace_strength = finiteOrFallback(defaults.vace_strength, 1.0);
     form.output_format = defaults.output_format || "png";
     form.output_compression = finiteOrFallback(defaults.output_compression, 100);
+    form.preview_mode = defaults.preview_mode || "none";
+    form.preview_interval = finiteOrFallback(defaults.preview_interval, 1);
 
     assignSampleParams(form.sample_params, sample, 20);
     assignSampleParams(form.high_noise_sample_params, highNoiseSample, -1);
