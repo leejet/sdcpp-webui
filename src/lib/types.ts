@@ -89,6 +89,8 @@ export interface GenerationForm {
   vace_strength: number;
   output_format: string;
   output_compression: number;
+  preview_mode: string;
+  preview_interval: number;
   sample_params: SampleParams;
   high_noise_sample_params: SampleParams;
   init_image: ImageEntry | null;
@@ -127,12 +129,14 @@ export interface Capabilities {
   samplers?: string[];
   schedulers?: string[];
   loras?: AvailableLora[];
+  preview_modes?: string[];
   limits?: {
     max_queue_size?: number;
   };
   features?: {
     cancel_queued?: boolean;
     cancel_generating?: boolean;
+    preview?: boolean;
   };
   features_by_mode?: Partial<Record<"img_gen" | "vid_gen", Record<string, any>>>;
   defaults?: Record<string, any>;
@@ -168,6 +172,11 @@ export interface Job {
   started?: number;
   completed?: number;
   result?: JobResult | null;
+  preview?: {
+    step: number;
+    total_steps: number;
+    b64_json: string;
+  } | null;
   error?: {
     code?: string;
     message?: string;

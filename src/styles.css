@@ -624,6 +624,36 @@ button {
     background: #000;
 }
 
+.hero-frame--preview {
+    position: relative;
+}
+
+.hero-frame__preview-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(17, 24, 39, 0.72);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.hero-frame__preview-label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.hero-frame__preview-step {
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
 .hero-placeholder {
     padding: 32px;
     text-align: center;

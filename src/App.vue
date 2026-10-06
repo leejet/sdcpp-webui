@@ -39,6 +39,7 @@ const sectionState = reactive<Record<string, boolean>>({
     auxiliaryImages: false,
     lora: false,
     vaeTiling: false,
+    preview: false,
     cache: false,
 });
 const loadingCapabilities = ref(false);
@@ -91,6 +92,8 @@ const fullImageInputs = computed(() => currentImageInputs.value.filter((input) =
 const queueLimit = computed(() => capabilities.value?.limits?.max_queue_size ?? "unknown");
 const canCancelQueued = computed(() => Boolean(currentJobFeatures.value.cancel_queued));
 const canCancelGenerating = computed(() => Boolean(currentJobFeatures.value.cancel_generating));
+const supportsPreview = computed(() => Boolean(currentJobFeatures.value.preview));
+const previewModes = computed(() => capabilities.value?.preview_modes || ["none", "latent", "decoded"]);
 
 const currentStatus = computed(() => currentJob.value?.status || "idle");
 const currentJobKind = computed(() => currentJob.value?.kind || null);
@@ -129,6 +132,14 @@ const animatedVideoImageSrc = computed(() => {
     return `data:image/webp;base64,${currentJob.value.result.b64_json}`;
 });
 const previewImageSrc = computed(() => animatedVideoImageSrc.value || selectedImage.value);
+const livePreviewSrc = computed(() => {
+    if (currentStatus.value !== "generating" || !currentJob.value?.preview?.b64_json) {
+        return null;
+    }
+    return `data:image/png;base64,${currentJob.value.preview.b64_json}`;
+});
+const livePreviewStep = computed(() => currentJob.value?.preview?.step ?? 0);
+const livePreviewTotalSteps = computed(() => currentJob.value?.preview?.total_steps ?? 0);
 const downloadableSrc = computed(() => {
     const result = currentJob.value?.result;
     if (currentJobKind.value === "vid_gen" && result?.b64_json && videoMimeType.value) {
@@ -829,6 +840,21 @@ onBeforeUnmount(() => {
                     </div>
                 </CollapsibleSection>
 
+                <CollapsibleSection v-if="supportsPreview" class="stack-top" eyebrow="Preview" :summary="form.preview_mode === 'none' ? 'Disabled' : form.preview_mode" :open="sectionState.preview" @toggle="toggleSection('preview')">
+                    <div class="fields">
+                        <div class="field">
+                            <label>Preview Mode</label>
+                            <select v-model="form.preview_mode">
+                                <option v-for="mode in previewModes" :key="mode" :value="mode">{{ mode }}</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Interval (steps)</label>
+                            <input v-model.number="form.preview_interval" type="number" min="1" step="1" />
+                        </div>
+                    </div>
+                </CollapsibleSection>
+
                 <CollapsibleSection class="stack-top" eyebrow="Cache" :summary="cacheSummary" :open="sectionState.cache" @toggle="toggleSection('cache')">
                     <div class="field">
                         <label>Mode</label>
@@ -849,6 +875,13 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
+                <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
+                    <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
+                    <div class="hero-frame__preview-overlay">
+                        <span class="hero-frame__preview-label">Preview</span>
+                        <span class="hero-frame__preview-step">{{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
+                    </div>
+                </div>
                 <div v-if="videoPreviewSrc" class="hero-frame hero-frame--media">
                     <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
                 </div>

@@ -27,6 +27,8 @@ export function createBlankForm(): GenerationForm {
         vace_strength: 1.0,
         output_format: "png",
         output_compression: 100,
+        preview_mode: "none",
+        preview_interval: 1,
         sample_params: {
             scheduler: "default",
             sample_method: "default",
