@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 
 import CollapsibleSection from "./components/CollapsibleSection.vue";
 import ImageDropzone from "./components/ImageDropzone.vue";
+import ImageHistory from "./components/ImageHistory.vue";
 import StatusChip from "./components/StatusChip.vue";
 import { cancelJob, getCapabilities, getJob, submitImageJob, submitVideoJob } from "./lib/api";
 import { buildRequestBodyForMode, CACHE_MODES, createBlankForm, formFromCapabilities } from "./lib/form";
 import { IMAGE_INPUTS, VIDEO_IMAGE_INPUTS } from "./lib/image-inputs";
 import { assignImageEntries, clearImageEntries, filesToImageEntries, removeImageEntry } from "./lib/images";
 import { createStoredRef, normalizePollIntervalMs } from "./lib/settings";
+import { createImageSubmission, recordImageHistory } from "./lib/history";
+import type { ImageHistoryEntry, PendingImageSubmission } from "./lib/history";
 import type {
     Capabilities,
     GenerationForm,
@@ -21,7 +24,7 @@ import type {
 
 const baseUrl = createStoredRef<string>("sdcpp-webui-base-url", "", (value: unknown) => String(value || ""));
 const pollIntervalMs = createStoredRef<number>("sdcpp-webui-poll-interval-ms", 100, normalizePollIntervalMs);
-const activeTab = ref<"image" | "video" | "settings">("image");
+const activeTab = ref<"image" | "video" | "history" | "settings">("image");
 const selectedGenerationTab = ref<"image" | "video">("image");
 const generationMode = computed<GenerationMode>(() => selectedGenerationTab.value === "video" ? "video" : "image");
 const lightboxOpen = ref(false);
@@ -47,6 +50,8 @@ const capabilitiesError = ref("");
 const serviceOnline = ref(false);
 const capabilities = ref<Capabilities | null>(null);
 const currentJob = ref<Job | null>(null);
+const imageHistory = shallowRef<ImageHistoryEntry[]>([]);
+let pendingImageSubmission: PendingImageSubmission | null = null;
 const selectedOutputIndex = ref(0);
 const statusMessage = ref("");
 const statusTone = ref("");
@@ -357,6 +362,8 @@ async function pollJob(id: string): Promise<void> {
             return;
         }
         stopElapsedTimer();
+        imageHistory.value = recordImageHistory(imageHistory.value, currentJob.value, pendingImageSubmission);
+        pendingImageSubmission = null;
         if (currentStatus.value === "completed") {
             setMessage(currentJob.value?.kind === "vid_gen" ? "Video generation completed." : "Image generation completed.", "success");
             return;
@@ -378,12 +385,14 @@ async function pollJob(id: string): Promise<void> {
 async function generate(): Promise<void> {
     try {
         const request = buildRequestBodyForMode(generationMode.value, form);
+        const submission = createImageSubmission(request, form, modelName.value, baseUrl.value);
         clearMessage();
         selectedOutputIndex.value = 0;
         startElapsedTimer();
         currentJob.value = generationMode.value === "video"
             ? await submitVideoJob(baseUrl.value, request)
             : await submitImageJob(baseUrl.value, request);
+        pendingImageSubmission = submission ? { jobId: currentJob.value.id, submission } : null;
         await pollJob(currentJob.value.id);
     } catch (error) {
         stopElapsedTimer();
@@ -397,6 +406,7 @@ async function cancelCurrentJob(): Promise<void> {
     }
     try {
         currentJob.value = await cancelJob(baseUrl.value, currentJob.value.id);
+        pendingImageSubmission = null;
         stopPolling();
         stopElapsedTimer();
         setMessage("Job cancelled.", "error");
@@ -559,6 +569,7 @@ onBeforeUnmount(() => {
                 <div class="page-tabs__list">
                     <button class="page-tab" :class="{ 'page-tab--active': activeTab === 'image' }" type="button" @click="selectGenerationMode('image')" :disabled="!supportsImageMode">Image Generation</button>
                     <button class="page-tab" :class="{ 'page-tab--active': activeTab === 'video' }" type="button" @click="selectGenerationMode('video')" :disabled="!supportsVideoMode">Video Generation</button>
+                    <button class="page-tab" :class="{ 'page-tab--active': activeTab === 'history' }" type="button" @click="activeTab = 'history'">History ({{ imageHistory.length }})</button>
                     <button class="page-tab" :class="{ 'page-tab--active': activeTab === 'settings' }" type="button" @click="activeTab = 'settings'">Settings</button>
                 </div>
                 <div class="page-tabs__actions">
@@ -598,7 +609,8 @@ onBeforeUnmount(() => {
             </div>
         </header>
 
-        <div v-if="activeTab !== 'settings'" class="layout">
+        <ImageHistory v-if="activeTab === 'history'" :entries="imageHistory" @preview="openLightbox" />
+        <div v-if="activeTab === 'image' || activeTab === 'video'" class="layout">
             <section class="panel control-panel">
                 <div class="panel-header">
                     <div>

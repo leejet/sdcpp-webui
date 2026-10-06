@@ -30,6 +30,13 @@ The current UI supports:
 - VAE tiling controls
 - cache controls
 - job polling, cancellation, image preview, and video or animated WebP preview
+- a History tab for completed images, downloads, and their submitted parameters
+
+Image history is held in memory for the current browser tab. Refreshing or closing
+the page clears it. Only image jobs completed in this tab are recorded; results
+remain viewable even after the server expires them. Parameters are captured at
+submission time, with input image filenames and types instead of image payloads.
+Random seeds and defaults chosen by the server are shown as submitted, not resolved.
 
 ## Requirements
 
