@@ -808,10 +808,10 @@ onBeforeUnmount(() => {
 
                     <div v-else>
                         <div class="group">
-                            <label>Reference Images</label>
+                            <label>Reference Images (MiniMax-H3 Ref2VA only)</label>
                             <ImageDropzone
                                 label="Reference Images"
-                                description="Multiple reference images supported."
+                                description="Only MiniMax-H3 Ref2VA uses these images; other video models ignore them. Cannot be combined with an initial or end frame."
                                 :items="form.ref_images"
                                 multiple
                                 @select="assignImages('ref_images', $event)"

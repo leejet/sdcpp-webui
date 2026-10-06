@@ -151,6 +151,10 @@ export function buildImageRequestBody(form: GenerationForm) {
 }
 
 export function buildVideoRequestBody(form: GenerationForm) {
+    if (form.ref_images.length && (form.init_image || form.end_image)) {
+        throw new Error("Video reference images cannot be combined with an initial or end frame. Clear the reference images or both keyframes before generating.");
+    }
+
     return {
         ...buildRequestBody(form),
         video_frames: parseNumber(form.video_frames, 33),
