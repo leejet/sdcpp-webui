@@ -173,6 +173,7 @@ export interface Job {
   completed?: number;
   result?: JobResult | null;
   preview?: {
+    pass: number;
     step: number;
     total_steps: number;
     b64_json: string;

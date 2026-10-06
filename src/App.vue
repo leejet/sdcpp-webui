@@ -93,7 +93,7 @@ const queueLimit = computed(() => capabilities.value?.limits?.max_queue_size ?? 
 const canCancelQueued = computed(() => Boolean(currentJobFeatures.value.cancel_queued));
 const canCancelGenerating = computed(() => Boolean(currentJobFeatures.value.cancel_generating));
 const supportsPreview = computed(() => Boolean(currentJobFeatures.value.preview));
-const previewModes = computed(() => capabilities.value?.preview_modes || ["none", "latent", "decoded"]);
+const previewModes = computed(() => capabilities.value?.preview_modes || ["none", "proj", "tae", "vae"]);
 
 const currentStatus = computed(() => currentJob.value?.status || "idle");
 const currentJobKind = computed(() => currentJob.value?.kind || null);
@@ -138,6 +138,7 @@ const livePreviewSrc = computed(() => {
     }
     return `data:image/png;base64,${currentJob.value.preview.b64_json}`;
 });
+const livePreviewPass = computed(() => currentJob.value?.preview?.pass ?? 1);
 const livePreviewStep = computed(() => currentJob.value?.preview?.step ?? 0);
 const livePreviewTotalSteps = computed(() => currentJob.value?.preview?.total_steps ?? 0);
 const downloadableSrc = computed(() => {
@@ -879,10 +880,10 @@ onBeforeUnmount(() => {
                     <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
                     <div class="hero-frame__preview-overlay">
                         <span class="hero-frame__preview-label">Preview</span>
-                        <span class="hero-frame__preview-step">{{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
+                        <span class="hero-frame__preview-step">Pass {{ livePreviewPass }} · {{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
                     </div>
                 </div>
-                <div v-if="videoPreviewSrc" class="hero-frame hero-frame--media">
+                <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
                     <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
                 </div>
                 <button v-else class="hero-frame hero-frame--button" type="button" :disabled="!previewImageSrc" @click="openLightbox(previewImageSrc, 'Generated output')">
