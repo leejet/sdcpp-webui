@@ -202,6 +202,7 @@ const imageInputsSummary = computed(() => {
         if (form.ref_images.length) parts.push(`${form.ref_images.length} refs`);
     } else {
         if (form.end_image) parts.push("end");
+        if (form.ref_images.length) parts.push(`${form.ref_images.length} refs`);
         if (form.control_frames.length) parts.push(`${form.control_frames.length} frames`);
     }
     return parts.length ? parts.join(" · ") : "No images";
@@ -805,24 +806,47 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
 
-                    <div v-else class="group">
-                        <label>Control Frames</label>
-                        <ImageDropzone
-                            label="Control Frames"
-                            description="Upload ordered conditioning frames. The server preserves the array order."
-                            :items="form.control_frames"
-                            multiple
-                            @select="assignImages('control_frames', $event)"
-                            @clear="clearImage('control_frames')"
-                        />
-                        <div v-if="!form.control_frames.length" class="hint">No files selected.</div>
-                        <div v-else class="file-list">
-                            <div v-for="(item, index) in form.control_frames" :key="item.name + index" class="file-chip file-chip--preview">
-                                <button class="file-chip__thumb-button" type="button" @click="openLightbox(item.dataUrl, item.name)">
-                                    <img class="file-chip__thumb" :src="item.dataUrl" :alt="item.name" />
-                                </button>
-                                <span class="file-chip__name">{{ item.name }}</span>
-                                <button class="icon-button" type="button" @click="removeCollectionImage('control_frames', index)">Remove</button>
+                    <div v-else>
+                        <div class="group">
+                            <label>Reference Images</label>
+                            <ImageDropzone
+                                label="Reference Images"
+                                description="Multiple reference images supported."
+                                :items="form.ref_images"
+                                multiple
+                                @select="assignImages('ref_images', $event)"
+                                @clear="clearImage('ref_images')"
+                            />
+                            <div v-if="!form.ref_images.length" class="hint">No files selected.</div>
+                            <div v-else class="file-list">
+                                <div v-for="(item, index) in form.ref_images" :key="item.name + index" class="file-chip file-chip--preview">
+                                    <button class="file-chip__thumb-button" type="button" @click="openLightbox(item.dataUrl, item.name)">
+                                        <img class="file-chip__thumb" :src="item.dataUrl" :alt="item.name" />
+                                    </button>
+                                    <span class="file-chip__name">{{ item.name }}</span>
+                                    <button class="icon-button" type="button" @click="removeCollectionImage('ref_images', index)">Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="group stack-top">
+                            <label>Control Frames</label>
+                            <ImageDropzone
+                                label="Control Frames"
+                                description="Upload ordered conditioning frames. The server preserves the array order."
+                                :items="form.control_frames"
+                                multiple
+                                @select="assignImages('control_frames', $event)"
+                                @clear="clearImage('control_frames')"
+                            />
+                            <div v-if="!form.control_frames.length" class="hint">No files selected.</div>
+                            <div v-else class="file-list">
+                                <div v-for="(item, index) in form.control_frames" :key="item.name + index" class="file-chip file-chip--preview">
+                                    <button class="file-chip__thumb-button" type="button" @click="openLightbox(item.dataUrl, item.name)">
+                                        <img class="file-chip__thumb" :src="item.dataUrl" :alt="item.name" />
+                                    </button>
+                                    <span class="file-chip__name">{{ item.name }}</span>
+                                    <button class="icon-button" type="button" @click="removeCollectionImage('control_frames', index)">Remove</button>
+                                </div>
                             </div>
                         </div>
                     </div>
