@@ -91,18 +91,46 @@ let timer = 0;
 let revision = 0;
 let polling = false;
 let previousStatus = "";
+let previousRevision: number | null = null;
+let previousActiveRecipe: string | null = null;
 let restorePending = true;
 
 function acceptStatus(next: ModelStatus): void {
     const signature = JSON.stringify(next);
     const changed = previousStatus !== "" && previousStatus !== signature;
+    // The server bumps the revision whenever a load starts, succeeds, or
+    // fails. The revision bump (with a previous-active-recipe fallback for
+    // servers that do not report one) detects transitions between ready
+    // states that polling skipped (fast loads, background-tab throttling).
+    // An intentional preview changes only the local selection, never the
+    // server, so it is left untouched. The first observation only
+    // establishes the baseline.
+    const loadTransitioned = next.recipe != null &&
+        ((next.revision != null && previousRevision != null && next.revision > previousRevision) ||
+            (previousActiveRecipe != null && next.recipe !== previousActiveRecipe));
     previousStatus = signature;
+    previousRevision = next.revision ?? previousRevision;
+    previousActiveRecipe = next.recipe;
     status.value = next;
     emit("status", next);
     if (selectedId.value === "@command-line" && !next.runtime_recipe) {
         selectedId.value = next.recipe || "";
         restoreSelection();
         emit("catalogRecipe", recipe.value || null);
+    }
+    // Follow the server when its active model becomes ready here: the load
+    // may have been started by another client (e.g. an external script), or
+    // it may have finished while this page was opening. Loading and error
+    // states keep reporting status but do not switch the selector or apply
+    // generation defaults, since the model has not loaded successfully.
+    // The selector snaps to the server's recipe and its resolved components,
+    // and a recipe switch applies generation defaults exactly as a manual
+    // selection would.
+    if (loadTransitioned && next.state === "ready" && next.recipe) {
+        const switchedRecipe = next.recipe !== selectedId.value;
+        if (switchedRecipe) selectedId.value = next.recipe;
+        restoreSelection(true);
+        if (switchedRecipe && recipe.value) emit("recipe", recipe.value);
     }
     if (changed && next.state !== "loading") emit("changed");
 }
@@ -118,9 +146,17 @@ function selectRecipe(id: string): void {
     if (recipe.value) emit("recipe", recipe.value);
 }
 
-function restoreSelection(): void {
+function restoreSelection(fromServer = false): void {
     const saved = savedSelections.value[storageScope.value];
-    const current = saved?.modelsByRecipe[selectedId.value] ?? (status.value?.recipe === selectedId.value ? status.value.models : {});
+    const serverSelection = status.value && status.value.recipe === selectedId.value ? status.value.models : undefined;
+    // Following the server's active load must show the components the server
+    // actually resolved, so a later "Load models" re-submits the same
+    // configuration. A local restore prefers the saved per-recipe selection,
+    // then the live status for the same recipe, then recipe-declared model
+    // defaults, so a fresh browser still pre-fills slots.
+    const current = fromServer
+        ? (serverSelection ?? saved?.modelsByRecipe[selectedId.value] ?? recipe.value?.models ?? {})
+        : (saved?.modelsByRecipe[selectedId.value] ?? serverSelection ?? (recipe.value?.models || {}));
     selection.value = Object.fromEntries((recipe.value?.slots || []).map((slot) => {
         const value = current[slot.id] ?? (slot.id === "tae" ? current.taesd : slot.id === "taesd" ? current.tae : "") ?? "";
         return [slot.id, filesForSlot(slot).some((file) => file.id === value) ? value : ""];
@@ -218,6 +254,8 @@ watch([selectedId, selection], saveSelection, { deep: true });
 watch(() => props.baseUrl, () => {
     revision++;
     previousStatus = "";
+    previousRevision = null;
+    previousActiveRecipe = null;
     status.value = null;
     recipes.value = [];
     files.value = [];

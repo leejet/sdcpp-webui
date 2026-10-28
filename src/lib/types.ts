@@ -223,6 +223,7 @@ export interface ModelStatus {
   recipe: string | null;
   models: Record<string, string>;
   error: string | null;
+  revision?: number;
   origin?: string;
   runtime_recipe?: Recipe;
   load_elapsed_seconds?: number | null;
@@ -266,6 +267,7 @@ export interface Recipe {
   video_constraints?: VideoConstraints;
   required_any?: string[][];
   source: "builtin" | "user" | "command_line";
+  models?: Record<string, string>;
   defaults?: RecipeDefaults;
   features?: string[];
   disabled_features?: string[];
