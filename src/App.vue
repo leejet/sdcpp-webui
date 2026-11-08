@@ -11,6 +11,7 @@ import ModelSelector from "./components/ModelSelector.vue";
 import SearchableSelect from "./components/SearchableSelect.vue";
 import MediaDropzone from "./components/MediaDropzone.vue";
 import StatusChip from "./components/StatusChip.vue";
+import GenerationProgress from "./components/GenerationProgress.vue";
 import { cancelJob, getCapabilities, getJob, submitImageJob, submitVideoJob } from "./lib/api";
 import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFromCapabilities } from "./lib/form";
 import { availableCacheModes, featuresForMode, supportsEta, supportsFlowShift, usesSCM } from "./lib/generation-features";
@@ -71,6 +72,7 @@ const modelSelection = ref<Record<string, string>>({});
 const modelReady = computed(() => modelStatus.value ? modelStatus.value.state === "ready" : Boolean(capabilities.value?.model?.name));
 const currentJob = ref<Job | null>(null);
 const selectedOutputIndex = ref(0);
+const submittedAspectRatio = ref<number | null>(null);
 const statusMessage = ref("");
 const statusTone = ref("");
 const cancelling = ref(false);
@@ -83,6 +85,11 @@ const modeDrafts = new Map<GenerationMode, GenerationForm>();
 const videoInput = useMediaInput("video", toRef(form, "ref_video"));
 const audioInput = useMediaInput("audio", toRef(form, "ref_audio"));
 const submitting = ref(false);
+const outputAspectRatio = computed(() => {
+    if (currentJob.value && submittedAspectRatio.value !== null) return submittedAspectRatio.value;
+    const ratio = Number(form.width) / Number(form.height);
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+});
 
 let pollTimer = 0;
 let elapsedTimer = 0;
@@ -207,9 +214,6 @@ const livePreviewSrc = computed(() => {
     }
     return `data:image/png;base64,${currentJob.value.preview.b64_json}`;
 });
-const livePreviewPass = computed(() => currentJob.value?.preview?.pass ?? 1);
-const livePreviewStep = computed(() => currentJob.value?.preview?.step ?? 0);
-const livePreviewTotalSteps = computed(() => currentJob.value?.preview?.total_steps ?? 0);
 const downloadableSrc = computed(() => {
     const result = currentJob.value?.result;
     if (currentJobKind.value === "vid_gen" && result?.b64_json && videoMimeType.value) {
@@ -509,9 +513,12 @@ async function generate(): Promise<void> {
         clearMessage();
         selectedOutputIndex.value = 0;
         startElapsedTimer();
-        currentJob.value = generationMode.value === "video"
+        const job = generationMode.value === "video"
             ? await submitVideoJob(baseUrl.value, request)
             : await submitImageJob(baseUrl.value, request);
+        const ratio = Number(request.width) / Number(request.height);
+        submittedAspectRatio.value = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+        currentJob.value = job;
         await pollJob(currentJob.value.id);
     } catch (error) {
         stopElapsedTimer();
@@ -811,59 +818,60 @@ onBeforeUnmount(() => {
         </section>
         <main v-show="!settingsOpen" class="studio-workspace">
             <section class="output-stage" aria-label="Generated output" @dragover="onReferenceDragover" @drop="onReferenceDrop">
-                <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
-                    <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
-                    <div class="hero-frame__preview-overlay">
-                        <span class="hero-frame__preview-label">Preview</span>
-                        <span class="hero-frame__preview-step">Pass {{ livePreviewPass }} · {{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
-                    </div>
-                </div>
-                <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
-                    <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
-                </div>
-                <button v-else-if="previewImageSrc" class="hero-frame hero-frame--button" type="button" @click="openLightbox(previewImageSrc, 'Generated output')">
-                    <img :src="previewImageSrc" alt="Generated output" />
-                </button>
-                <div v-else class="hero-frame hero-frame--empty">
-                    <div v-if="!modelReady || previewingRecipe" class="hero-placeholder hero-placeholder--model">
-                        <div aria-live="polite">
-                            <h2>{{ modelStatus?.state === 'loading' ? 'Loading your model' : 'Choose a model to get started' }}</h2>
-                            <p>{{ modelStatus?.state === 'loading'
-                                ? 'Your model is loading. You can prepare your prompt while you wait.'
-                                : 'Select a recipe and load its model, then bring your ideas to life.' }}</p>
+                <div class="output-canvas" :style="{ '--output-ratio': outputAspectRatio }">
+                    <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
+                        <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
+                        <div class="hero-frame__preview-overlay">
+                            <span class="hero-frame__preview-label">Preview</span>
                         </div>
-                        <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">{{ modelStatus?.state === 'loading' ? 'View loading status' : 'Choose & load model' }}</button>
                     </div>
-                    <div v-else class="hero-placeholder">
-                        <h2>{{ generationMode === "video" ? "Imagine it in motion" : "Make room for imagination" }}</h2>
-                        <p>
-                            {{ generationMode === "video"
-                                ? "Describe a scene below, add a reference, and create your next video."
-                                : "Start with a few words. Your next image will appear here." }}
-                        </p>
+                    <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
+                        <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
                     </div>
-                </div>
-
-                <div v-if="currentJob" class="stage-footer">
-                    <div class="stage-status">
-                        <StatusChip :status="currentStatus" :label="currentJob.cancel_requested && isJobRunning ? 'Cancelling' : currentStatus" />
-                        <span>{{ formatElapsed(currentJob) }}</span>
-                        <span v-if="currentStatus === 'queued'">Queue {{ currentJob.queue_position ?? 0 }}</span>
-                        <span v-if="livePreviewSrc">{{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
-                    </div>
-                    <div class="stage-actions">
-                        <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="generationDetails?.showModal()">Details</button>
-                        <button v-if="downloadableSrc" class="btn-secondary" type="button" @click="downloadSelected">Download</button>
-                    </div>
-                </div>
-
-                <div v-if="statusMessage && statusTone !== 'success'" class="status-message stage-message" role="status" :class="statusTone === 'error' ? 'status-message--error' : ''">{{ statusMessage }}</div>
-                <div v-else-if="currentJob?.error?.message" class="status-message status-message--error stage-message" role="alert">{{ currentJob.error.message }}</div>
-
-                <div v-if="currentImages.length > 1" class="thumb-row">
-                    <button v-for="(image, index) in currentImages" :key="image.index" class="thumb" :class="{ 'thumb--active': index === selectedOutputIndex }" type="button" @click="selectOutput(index)">
-                        <img :src="`data:image/${currentJob?.result?.output_format || 'png'};base64,${image.b64_json}`" :alt="`Output ${index + 1}`" />
+                    <button v-else-if="previewImageSrc" class="hero-frame hero-frame--button" type="button" @click="openLightbox(previewImageSrc, 'Generated output')">
+                        <img :src="previewImageSrc" alt="Generated output" />
                     </button>
+                    <div v-else class="hero-frame hero-frame--empty">
+                        <div v-if="!modelReady || previewingRecipe" class="hero-placeholder hero-placeholder--model">
+                            <div aria-live="polite">
+                                <h2>{{ modelStatus?.state === 'loading' ? 'Loading your model' : 'Choose a model to get started' }}</h2>
+                                <p>{{ modelStatus?.state === 'loading'
+                                    ? 'Your model is loading. You can prepare your prompt while you wait.'
+                                    : 'Select a recipe and load its model, then bring your ideas to life.' }}</p>
+                            </div>
+                            <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">{{ modelStatus?.state === 'loading' ? 'View loading status' : 'Choose & load model' }}</button>
+                        </div>
+                        <div v-else class="hero-placeholder">
+                            <h2>{{ generationMode === "video" ? "Imagine it in motion" : "Make room for imagination" }}</h2>
+                            <p>
+                                {{ generationMode === "video"
+                                    ? "Describe a scene below, add a reference, and create your next video."
+                                    : "Start with a few words. Your next image will appear here." }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="canvas-overlays">
+                        <div v-if="statusMessage && statusTone !== 'success'" class="status-message stage-message" role="status" :class="statusTone === 'error' ? 'status-message--error' : ''">{{ statusMessage }}</div>
+                        <div v-else-if="currentJob?.error?.message" class="status-message status-message--error stage-message" role="alert">{{ currentJob.error.message }}</div>
+
+                        <div v-if="currentImages.length > 1" class="thumb-row">
+                            <button v-for="(image, index) in currentImages" :key="image.index" class="thumb" :class="{ 'thumb--active': index === selectedOutputIndex }" type="button" @click="selectOutput(index)">
+                                <img :src="`data:image/${currentJob?.result?.output_format || 'png'};base64,${image.b64_json}`" :alt="`Output ${index + 1}`" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stage-footer">
+                    <GenerationProgress v-if="currentJob" :job="currentJob" :now="nowMilliseconds">
+                        <template #actions>
+                            <div class="stage-actions">
+                                <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="generationDetails?.showModal()">Details</button>
+                                <button v-if="downloadableSrc" class="btn-secondary" type="button" @click="downloadSelected">Download</button>
+                            </div>
+                        </template>
+                    </GenerationProgress>
                 </div>
             </section>
             <PromptComposer ref="composer" :form="form" :mode="generationMode" :model-label="selectedRecipe?.name || (modelReady ? modelName : 'Choose model')"

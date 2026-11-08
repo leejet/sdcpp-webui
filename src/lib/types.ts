@@ -200,6 +200,16 @@ export interface Job {
   started?: number;
   completed?: number;
   result?: JobResult | null;
+  progress?: {
+    stage: string;
+    detail: string;
+    pass: number;
+    completed: number | null;
+    total: number | null;
+    unit: string | null;
+    stage_elapsed_ms: number;
+    elapsed_ms: number;
+  } | null;
   preview?: {
     pass: number;
     step: number;
