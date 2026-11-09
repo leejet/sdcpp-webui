@@ -6,10 +6,12 @@ import ResolutionPicker from "./ResolutionPicker.vue";
 import { aspectLabel, dimensionError } from "../lib/resolution";
 import { createStoredRef } from "../lib/settings";
 import type { Dimensions } from "../lib/resolution";
+import type { PromptEnhancement } from "../lib/prompt-enhancement";
 import type { Capabilities, GenerationForm, GenerationMode } from "../lib/types";
 
 const props = defineProps<{
     form: GenerationForm;
+    enhancement: PromptEnhancement;
     mode: GenerationMode;
     modelLabel: string;
     modelReady: boolean;
@@ -28,6 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (event: "generate"): void;
     (event: "cancel"): void;
+    (event: "enhancement-settings"): void;
 }>();
 const activePanel = ref("");
 const panelAnchor = shallowRef<HTMLElement | null>(null);
@@ -66,7 +69,7 @@ function setSize(next: Dimensions): void {
 
 function submit(event?: KeyboardEvent): void {
     if (event?.isComposing) return;
-    if (!props.disabled && !props.busy && !sizeError.value) emit("generate");
+    if (!props.disabled && !props.busy && !props.enhancement.enhancing && !sizeError.value) emit("generate");
 }
 
 async function resizePrompt(): Promise<void> {
@@ -74,6 +77,7 @@ async function resizePrompt(): Promise<void> {
     if (!textarea.value) return;
     textarea.value.style.height = "auto";
     textarea.value.style.height = `${Math.min(180, Math.max(76, textarea.value.scrollHeight))}px`;
+    if (props.enhancement.enhancing) textarea.value.scrollTop = textarea.value.scrollHeight;
 }
 
 async function resizeNegativePrompt(): Promise<void> {
@@ -126,8 +130,26 @@ defineExpose({
         <slot name="inputs" />
         <label class="sr-only" for="generation-prompt">Prompt</label>
         <textarea id="generation-prompt" ref="textarea" v-model="form.prompt" class="composer-prompt" rows="3"
+            :aria-busy="enhancement.enhancing"
             :placeholder="mode === 'video' ? 'Describe a scene. Bring it to life…' : 'Describe the image you have in mind…'"
             @keydown.ctrl.enter.prevent="submit" @keydown.meta.enter.prevent="submit" />
+
+        <div class="enhancement-actions composer-enhancement">
+            <template v-if="enhancement.enhancing">
+                <span class="hint" role="status">Enhancing…</span>
+                <button class="composer-enhancement__button" type="button" aria-label="Cancel prompt enhancement" @click="enhancement.cancel">Cancel</button>
+            </template>
+            <template v-else>
+                <button v-if="enhancement.canRestore" class="composer-enhancement__button" type="button" @click="enhancement.restore"><span aria-hidden="true">↶</span> Restore original</button>
+                <button class="composer-enhancement__button" type="button" :disabled="enhancement.configured && !enhancement.canRestore && !form.prompt.trim()"
+                    :title="!enhancement.configured ? 'Configure prompt enhancement' : enhancement.canRestore ? 'Enhance the original prompt again' : 'Enhance prompt'"
+                    @click="enhancement.configured ? enhancement.enhance() : emit('enhancement-settings')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="m14 3 2.5 6.5L23 12l-6.5 2.5L14 21l-2.5-6.5L5 12l6.5-2.5L14 3ZM4 2l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z" /></svg>
+                    {{ enhancement.canRestore ? 'Try again' : 'Enhance' }}
+                </button>
+            </template>
+        </div>
+        <p v-if="enhancement.error" class="composer-error composer-enhancement__error" role="alert">{{ enhancement.error }}</p>
 
         <div v-if="showNegativePrompt" class="composer-negative">
             <div class="composer-negative__header">
@@ -154,7 +176,7 @@ defineExpose({
                 <button class="composer-chip" type="button" :aria-expanded="activePanel === 'advanced'" aria-controls="composer-panel" @click="open('advanced', $event)">More <span aria-hidden="true">···</span></button>
             </div>
             <button v-if="busy" class="btn-danger composer-submit" type="button" :disabled="!canCancel || cancelling" @click="emit('cancel')">{{ cancelling ? 'Cancelling…' : 'Cancel' }}</button>
-            <button v-else class="btn composer-submit" type="button" :disabled="disabled || Boolean(sizeError)" @click="submit()">{{ buttonLabel }}</button>
+            <button v-else class="btn composer-submit" type="button" :disabled="disabled || enhancement.enhancing || Boolean(sizeError)" @click="submit()">{{ buttonLabel }}</button>
         </div>
         <div class="composer-caption" aria-live="polite">
             <span v-if="sizeError" class="composer-error">{{ sizeError }}</span>

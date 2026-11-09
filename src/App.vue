@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from "vue";
 
 import PromptComposer from "./components/PromptComposer.vue";
+import PromptEnhancementSettings from "./components/PromptEnhancementSettings.vue";
 import ReferenceInputs from "./components/ReferenceInputs.vue";
 import brandSvg from "../icon-preview.svg?raw";
 import { dimensionError, sizeMultiple } from "./lib/resolution";
@@ -20,6 +21,7 @@ import { createStoredRef, normalizePollIntervalMs, normalizePreviewInterval } fr
 import { useLoraSelection } from "./lib/lora-selection";
 import { useTheme } from "./lib/theme";
 import { useMediaInput } from "./lib/media-input";
+import { usePromptEnhancement } from "./lib/prompt-enhancement";
 import type {
     Capabilities,
     ModelStatus,
@@ -78,6 +80,7 @@ const statusTone = ref("");
 const cancelling = ref(false);
 let pollVersion = 0;
 const form = reactive<GenerationForm>(createBlankForm());
+const enhancement = usePromptEnhancement(toRef(form, "prompt"), generationMode);
 const videoConstraints = computed(() => selectedRecipe.value?.video_constraints);
 const videoLength = reactive(useVideoLength(form, videoConstraints));
 const composer = ref<InstanceType<typeof PromptComposer> | null>(null);
@@ -433,6 +436,13 @@ function openSettings(): void {
     settingsOpen.value = !settingsOpen.value;
 }
 
+async function openEnhancementSettings(): Promise<void> {
+    composer.value?.close();
+    settingsOpen.value = true;
+    await nextTick();
+    document.getElementById("enhance-base-url")?.focus();
+}
+
 function stopPolling(): void {
     if (pollTimer) {
         window.clearTimeout(pollTimer);
@@ -768,6 +778,7 @@ onBeforeUnmount(() => {
                         <input v-model.number="pollIntervalMs" type="number" min="1" step="1" />
                     </div>
                 </div>
+                <PromptEnhancementSettings :enhancement="enhancement" />
                 <fieldset class="settings__group">
                     <legend>Live Preview</legend>
                     <div class="settings__grid">
@@ -875,6 +886,7 @@ onBeforeUnmount(() => {
                 </div>
             </section>
             <PromptComposer ref="composer" :form="form" :mode="generationMode" :model-label="selectedRecipe?.name || (modelReady ? modelName : 'Choose model')"
+                :enhancement="enhancement" @enhancement-settings="openEnhancementSettings"
                 :model-ready="canGenerate" :disabled="!canGenerate || mediaProcessing || submitting || (generationMode === 'video' && Boolean(videoLength.error))" :busy="isJobRunning"
                 :video-summary="videoLength.summary" :video-details="videoLength.details"
                 :can-cancel="canCancelCurrentJob" :cancelling="cancelling || Boolean(currentJob?.cancel_requested)"
