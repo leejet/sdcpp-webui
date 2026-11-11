@@ -1,5 +1,16 @@
 export function isNotificationSupported(): boolean {
-    return typeof window !== "undefined" && "Notification" in window;
+    if (typeof window === "undefined" || !("Notification" in window)) {
+        return false;
+    }
+    // Chrome on Android exposes the Notification API but `new Notification()`
+    // throws ("Illegal constructor"); notifications there require a service
+    // worker via ServiceWorkerRegistration.showNotification(). This app has
+    // no service worker, so report notifications as unsupported on Android
+    // instead of telling users notifications are enabled when none can be shown.
+    if (typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent || "")) {
+        return false;
+    }
+    return true;
 }
 
 export function getNotificationPermission(): NotificationPermission | "unsupported" {
@@ -23,9 +34,9 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     }
 }
 
-export function sendBrowserNotification(title: string, options?: NotificationOptions): void {
+export function sendBrowserNotification(title: string, options?: NotificationOptions): boolean {
     if (!isNotificationSupported() || Notification.permission !== "granted") {
-        return;
+        return false;
     }
     try {
         const notification = new Notification(title, options);
@@ -33,7 +44,8 @@ export function sendBrowserNotification(title: string, options?: NotificationOpt
             window.focus();
             notification.close();
         };
+        return true;
     } catch {
-        return;
+        return false;
     }
 }

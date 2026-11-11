@@ -575,9 +575,9 @@ async function generate(): Promise<void> {
     const invalidSize = dimensionError({ width: form.width, height: form.height }, capabilities.value?.limits, dimensionMultiple.value);
     if (invalidSize) { setMessage(invalidSize, "error"); return; }
     if (generationMode.value === "video" && videoLength.error) { setMessage(videoLength.error, "error"); return; }
-    await ensureNotificationPermission();
     submitting.value = true;
     try {
+        await ensureNotificationPermission();
         const request = buildRequestBodyForMode(generationMode.value, {
             ...form,
             ...(generationMode.value === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
