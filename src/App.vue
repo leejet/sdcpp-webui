@@ -18,6 +18,7 @@ import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFrom
 import { availableCacheModes, featuresForMode, supportsEta, supportsFlowShift, usesSCM } from "./lib/generation-features";
 import { assignImageEntries, clearImageEntries, filesToImageEntries, removeImageEntry } from "./lib/images";
 import { createStoredRef, normalizePollIntervalMs, normalizePreviewInterval } from "./lib/settings";
+import { getNotificationPermission, isNotificationSupported, requestNotificationPermission, sendBrowserNotification } from "./lib/notifications";
 import { useLoraSelection } from "./lib/lora-selection";
 import { useTheme } from "./lib/theme";
 import { useMediaInput } from "./lib/media-input";
@@ -41,6 +42,24 @@ const baseUrl = createStoredRef<string>("sdcpp-webui-base-url", "", (value: unkn
 const pollIntervalMs = createStoredRef<number>("sdcpp-webui-poll-interval-ms", 100, normalizePollIntervalMs);
 const preferredPreviewMode = createStoredRef<string>("sdcpp-webui-preview-mode", "none", (value: unknown) => typeof value === "string" ? value : "none");
 const previewInterval = createStoredRef<number>("sdcpp-webui-preview-interval", 1, normalizePreviewInterval);
+const notifyOnCompletion = createStoredRef<boolean>("sdcpp-webui-notify-on-completion", false, (value: unknown) => typeof value === "boolean" ? value : false);
+const notificationPermission = ref<NotificationPermission | "unsupported">(getNotificationPermission());
+const notificationSupported = computed(() => isNotificationSupported());
+const notificationStatusMessage = computed(() => {
+    if (!notificationSupported.value || notificationPermission.value === "unsupported") {
+        return "Browser notifications are not supported in this browser.";
+    }
+    if (!notifyOnCompletion.value) {
+        return "Enable to get a browser notification when generation finishes, even if the tab is in the background.";
+    }
+    if (notificationPermission.value === "granted") {
+        return "You will be notified when generation finishes.";
+    }
+    if (notificationPermission.value === "denied") {
+        return "Notifications are blocked. Allow notifications for this site in your browser settings, then enable this option again.";
+    }
+    return "Browser permission is needed before notifications can be shown.";
+});
 const settingsOpen = ref(false);
 const { theme, resolvedTheme, toggleTheme } = useTheme();
 const themeToggleLabel = computed(() => resolvedTheme.value === "dark" ? "Switch to light mode" : "Switch to dark mode");
@@ -432,8 +451,15 @@ function syncGenerationMode(mode: GenerationMode): void {
 }
 
 function openSettings(): void {
+    refreshNotificationPermission();
     composer.value?.close();
     settingsOpen.value = !settingsOpen.value;
+}
+
+async function onNotifyToggle(): Promise<void> {
+    if (notifyOnCompletion.value) {
+        await ensureNotificationPermission();
+    }
 }
 
 async function openEnhancementSettings(): Promise<void> {
@@ -465,6 +491,40 @@ function startElapsedTimer(): void {
     }, 100);
 }
 
+function refreshNotificationPermission(): void {
+    notificationPermission.value = getNotificationPermission();
+}
+
+async function ensureNotificationPermission(): Promise<void> {
+    if (!notifyOnCompletion.value || !notificationSupported.value) {
+        return;
+    }
+    notificationPermission.value = await requestNotificationPermission();
+}
+
+function notifyJobFinished(status: string, kind: string | null, errorMessage?: string): void {
+    if (!notifyOnCompletion.value || !notificationSupported.value || notificationPermission.value !== "granted") {
+        return;
+    }
+    const isVideo = kind === "vid_gen";
+    if (status === "completed") {
+        sendBrowserNotification(isVideo ? "Video generation completed" : "Image generation completed", {
+            body: isVideo ? "Your video is ready." : "Your image is ready.",
+            tag: currentJob.value?.id,
+        });
+    } else if (status === "failed") {
+        sendBrowserNotification("Generation failed", {
+            body: errorMessage || "Generation failed.",
+            tag: currentJob.value?.id,
+        });
+    } else if (status === "cancelled") {
+        sendBrowserNotification("Generation cancelled", {
+            body: "The generation job was cancelled.",
+            tag: currentJob.value?.id,
+        });
+    }
+}
+
 async function pollJob(id: string): Promise<void> {
     stopPolling();
     const version = ++pollVersion;
@@ -485,14 +545,18 @@ async function pollJob(id: string): Promise<void> {
         stopElapsedTimer();
         if (currentStatus.value === "completed") {
             setMessage(currentJob.value?.kind === "vid_gen" ? "Video generation completed." : "Image generation completed.", "success");
+            notifyJobFinished("completed", currentJob.value?.kind || null);
             return;
         }
         if (currentStatus.value === "cancelled") {
             setMessage("Job cancelled.", "error");
+            notifyJobFinished("cancelled", currentJob.value?.kind || null);
             return;
         }
         if (currentStatus.value === "failed") {
-            setMessage(currentJob.value?.error?.message || "Generation failed.", "error");
+            const message = currentJob.value?.error?.message || "Generation failed.";
+            setMessage(message, "error");
+            notifyJobFinished("failed", currentJob.value?.kind || null, message);
         }
     } catch (error) {
         if (version !== pollVersion) return;
@@ -513,6 +577,7 @@ async function generate(): Promise<void> {
     if (generationMode.value === "video" && videoLength.error) { setMessage(videoLength.error, "error"); return; }
     submitting.value = true;
     try {
+        await ensureNotificationPermission();
         const request = buildRequestBodyForMode(generationMode.value, {
             ...form,
             ...(generationMode.value === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
@@ -710,6 +775,7 @@ watch(videoOutputFormats, () => {
 });
 
 onMounted(() => {
+    refreshNotificationPermission();
     window.addEventListener("paste", onPaste);
     refreshCapabilities();
 });
@@ -796,6 +862,12 @@ onBeforeUnmount(() => {
                     <div v-if="(selectedRecipe || modelReady) && preferredPreviewMode !== previewMode" class="hint stack-top">
                         The selected preview mode is unavailable for the current model configuration. Preview will be disabled; your preference is saved.
                     </div>
+                </fieldset>
+
+                <fieldset class="settings__group stack-top">
+                    <legend>Notifications</legend>
+                    <label class="checkbox"><input v-model="notifyOnCompletion" type="checkbox" :disabled="!notificationSupported" @change="onNotifyToggle" /><span>Notify me when generation finishes</span></label>
+                    <div class="hint stack-top">{{ notificationStatusMessage }}</div>
                 </fieldset>
 
                 <fieldset v-if="hasFeature('vae_tiling')" class="settings__group stack-top">
