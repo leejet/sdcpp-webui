@@ -21,6 +21,7 @@ The current UI supports:
 
 - automatic image/video generation mode selection from the selected recipe
 - prompt and negative prompt editing
+- streaming prompt enhancement through a configurable OpenAI-compatible API, with system prompt presets, retry, and restore
 - width, height, seed, batch count, video frames, and fps
 - sampler and scheduler selection
 - guidance controls, including the video high-noise stage
@@ -71,6 +72,33 @@ its text or saved expansion state.
 - Use **Ctrl+Enter** or **Cmd+Enter** from the prompt to generate. Configuration
   panels support Escape, focus return, and keyboard navigation. On small screens
   they open as bottom sheets.
+
+## Prompt Enhancement
+
+In **Settings → Prompt Enhancement**, enter an OpenAI-compatible API base URL
+(including its version path, such as `https://your-api.example/v1`), API key,
+and model ID. A full `/chat/completions` URL also works. The key is optional for
+local services that do not require authentication. Settings, including the key,
+are saved in this browser's local storage. Requests go directly to the provider,
+which must allow browser requests through CORS; an HTTPS UI needs an HTTPS API.
+
+Edit **System Prompt** directly; it is saved automatically and used for requests
+without requiring a preset. Choosing a **Preset** copies its text into this
+field. Further edits change only the current system prompt, not the saved preset.
+Preset controls sit below the System Prompt editor. To keep a reusable template,
+click **Save as new preset**, enter a name, and confirm with **Save preset**, or
+explicitly **Update selected preset**. Cancel closes the name field without
+creating a preset. Deleting a preset keeps the current system
+prompt. Ask the model to return only the resulting prompt text. The built-in
+General preset provides a starting point.
+
+Click **Enhance** below the prompt to stream the result into the editor. **Cancel**
+keeps the text received so far. **Restore original** returns to the exact original
+text; **Try again** generates another version from that original, using the
+current system prompt. Failed or incomplete requests restore the text from
+before that request. Editing the prompt manually or switching image/video modes
+cancels any pending enhancement and starts a new editing session without the old
+restore history. Image/video generation is disabled while enhancement is running.
 
 ## Requirements
 
@@ -160,7 +188,7 @@ scripts/
 
 - This UI is intentionally thin. Most selectable options come from the server's `capabilities` response.
 - It assumes the backend handles CORS correctly if the frontend is served from a different origin.
-- It is scoped to the native `sdcpp` API, not the OpenAI-compatible routes and not the A1111-compatible `sdapi` routes.
+- Image/video generation uses the native `sdcpp` API, not the OpenAI-compatible or A1111-compatible server routes. Prompt enhancement uses the separately configured chat completions API.
 
 ## License
 

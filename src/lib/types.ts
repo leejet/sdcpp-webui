@@ -200,6 +200,16 @@ export interface Job {
   started?: number;
   completed?: number;
   result?: JobResult | null;
+  progress?: {
+    stage: string;
+    detail: string;
+    pass: number;
+    completed: number | null;
+    total: number | null;
+    unit: string | null;
+    stage_elapsed_ms: number;
+    elapsed_ms: number;
+  } | null;
   preview?: {
     pass: number;
     step: number;
@@ -223,6 +233,7 @@ export interface ModelStatus {
   recipe: string | null;
   models: Record<string, string>;
   error: string | null;
+  revision?: number;
   origin?: string;
   runtime_recipe?: Recipe;
   command_line_recipe?: Recipe;
@@ -268,6 +279,7 @@ export interface Recipe {
   video_constraints?: VideoConstraints;
   required_any?: string[][];
   source: "builtin" | "user" | "command_line";
+  models?: Record<string, string>;
   defaults?: RecipeDefaults;
   features?: string[];
   disabled_features?: string[];

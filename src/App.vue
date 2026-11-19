@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from "vue";
 
 import PromptComposer from "./components/PromptComposer.vue";
+import PromptEnhancementSettings from "./components/PromptEnhancementSettings.vue";
 import ReferenceInputs from "./components/ReferenceInputs.vue";
 import brandSvg from "../icon-preview.svg?raw";
 import { dimensionError, sizeMultiple } from "./lib/resolution";
@@ -13,13 +14,16 @@ import MediaDropzone from "./components/MediaDropzone.vue";
 import StatusChip from "./components/StatusChip.vue";
 import { cancelJob, getCapabilities, getJob, loadModel, setModelTTL, submitImageJob, submitVideoJob } from "./lib/api";
 import { canLoadAndGenerate, selectedModelIsReady } from "./lib/model-readiness";
+import GenerationProgress from "./components/GenerationProgress.vue";
 import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFromCapabilities } from "./lib/form";
 import { availableCacheModes, featuresForMode, supportsEta, supportsFlowShift, usesSCM } from "./lib/generation-features";
 import { assignImageEntries, clearImageEntries, filesToImageEntries, removeImageEntry } from "./lib/images";
 import { createStoredRef, normalizePollIntervalMs, normalizePreviewInterval } from "./lib/settings";
+import { getNotificationPermission, isNotificationSupported, requestNotificationPermission, sendBrowserNotification } from "./lib/notifications";
 import { useLoraSelection } from "./lib/lora-selection";
 import { useTheme } from "./lib/theme";
 import { useMediaInput } from "./lib/media-input";
+import { usePromptEnhancement } from "./lib/prompt-enhancement";
 import type {
     Capabilities,
     ModelStatus,
@@ -39,6 +43,24 @@ const baseUrl = createStoredRef<string>("sdcpp-webui-base-url", "", (value: unkn
 const pollIntervalMs = createStoredRef<number>("sdcpp-webui-poll-interval-ms", 100, normalizePollIntervalMs);
 const preferredPreviewMode = createStoredRef<string>("sdcpp-webui-preview-mode", "none", (value: unknown) => typeof value === "string" ? value : "none");
 const previewInterval = createStoredRef<number>("sdcpp-webui-preview-interval", 1, normalizePreviewInterval);
+const notifyOnCompletion = createStoredRef<boolean>("sdcpp-webui-notify-on-completion", false, (value: unknown) => typeof value === "boolean" ? value : false);
+const notificationPermission = ref<NotificationPermission | "unsupported">(getNotificationPermission());
+const notificationSupported = computed(() => isNotificationSupported());
+const notificationStatusMessage = computed(() => {
+    if (!notificationSupported.value || notificationPermission.value === "unsupported") {
+        return "Browser notifications are not supported in this browser.";
+    }
+    if (!notifyOnCompletion.value) {
+        return "Enable to get a browser notification when generation finishes, even if the tab is in the background.";
+    }
+    if (notificationPermission.value === "granted") {
+        return "You will be notified when generation finishes.";
+    }
+    if (notificationPermission.value === "denied") {
+        return "Notifications are blocked. Allow notifications for this site in your browser settings, then enable this option again.";
+    }
+    return "Browser permission is needed before notifications can be shown.";
+});
 const settingsOpen = ref(false);
 const { theme, resolvedTheme, toggleTheme } = useTheme();
 const themeToggleLabel = computed(() => resolvedTheme.value === "dark" ? "Switch to light mode" : "Switch to dark mode");
@@ -82,11 +104,13 @@ watch(currentTTL, (value) => {
 const modelReady = computed(() => modelStatus.value ? modelStatus.value.state === "ready" : Boolean(capabilities.value?.model?.name));
 const currentJob = ref<Job | null>(null);
 const selectedOutputIndex = ref(0);
+const submittedAspectRatio = ref<number | null>(null);
 const statusMessage = ref("");
 const statusTone = ref("");
 const cancelling = ref(false);
 let pollVersion = 0;
 const form = reactive<GenerationForm>(createBlankForm());
+const enhancement = usePromptEnhancement(toRef(form, "prompt"), generationMode);
 const videoConstraints = computed(() => selectedRecipe.value?.video_constraints);
 const videoLength = reactive(useVideoLength(form, videoConstraints));
 const composer = ref<InstanceType<typeof PromptComposer> | null>(null);
@@ -94,6 +118,11 @@ const modeDrafts = new Map<GenerationMode, GenerationForm>();
 const videoInput = useMediaInput("video", toRef(form, "ref_video"));
 const audioInput = useMediaInput("audio", toRef(form, "ref_audio"));
 const submitting = ref(false);
+const outputAspectRatio = computed(() => {
+    if (currentJob.value && submittedAspectRatio.value !== null) return submittedAspectRatio.value;
+    const ratio = Number(form.width) / Number(form.height);
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+});
 
 let pollTimer = 0;
 let elapsedTimer = 0;
@@ -220,9 +249,6 @@ const livePreviewSrc = computed(() => {
     }
     return `data:image/png;base64,${currentJob.value.preview.b64_json}`;
 });
-const livePreviewPass = computed(() => currentJob.value?.preview?.pass ?? 1);
-const livePreviewStep = computed(() => currentJob.value?.preview?.step ?? 0);
-const livePreviewTotalSteps = computed(() => currentJob.value?.preview?.total_steps ?? 0);
 const downloadableSrc = computed(() => {
     const result = currentJob.value?.result;
     if (currentJobKind.value === "vid_gen" && result?.b64_json && videoMimeType.value) {
@@ -438,8 +464,22 @@ function syncGenerationMode(mode: GenerationMode): void {
 }
 
 function openSettings(): void {
+    refreshNotificationPermission();
     composer.value?.close();
     settingsOpen.value = !settingsOpen.value;
+}
+
+async function onNotifyToggle(): Promise<void> {
+    if (notifyOnCompletion.value) {
+        await ensureNotificationPermission();
+    }
+}
+
+async function openEnhancementSettings(): Promise<void> {
+    composer.value?.close();
+    settingsOpen.value = true;
+    await nextTick();
+    document.getElementById("enhance-base-url")?.focus();
 }
 
 function stopPolling(): void {
@@ -464,6 +504,40 @@ function startElapsedTimer(): void {
     }, 100);
 }
 
+function refreshNotificationPermission(): void {
+    notificationPermission.value = getNotificationPermission();
+}
+
+async function ensureNotificationPermission(): Promise<void> {
+    if (!notifyOnCompletion.value || !notificationSupported.value) {
+        return;
+    }
+    notificationPermission.value = await requestNotificationPermission();
+}
+
+function notifyJobFinished(status: string, kind: string | null, errorMessage?: string): void {
+    if (!notifyOnCompletion.value || !notificationSupported.value || notificationPermission.value !== "granted") {
+        return;
+    }
+    const isVideo = kind === "vid_gen";
+    if (status === "completed") {
+        sendBrowserNotification(isVideo ? "Video generation completed" : "Image generation completed", {
+            body: isVideo ? "Your video is ready." : "Your image is ready.",
+            tag: currentJob.value?.id,
+        });
+    } else if (status === "failed") {
+        sendBrowserNotification("Generation failed", {
+            body: errorMessage || "Generation failed.",
+            tag: currentJob.value?.id,
+        });
+    } else if (status === "cancelled") {
+        sendBrowserNotification("Generation cancelled", {
+            body: "The generation job was cancelled.",
+            tag: currentJob.value?.id,
+        });
+    }
+}
+
 async function pollJob(id: string): Promise<void> {
     stopPolling();
     const version = ++pollVersion;
@@ -484,14 +558,18 @@ async function pollJob(id: string): Promise<void> {
         stopElapsedTimer();
         if (currentStatus.value === "completed") {
             setMessage(currentJob.value?.kind === "vid_gen" ? "Video generation completed." : "Image generation completed.", "success");
+            notifyJobFinished("completed", currentJob.value?.kind || null);
             return;
         }
         if (currentStatus.value === "cancelled") {
             setMessage("Job cancelled.", "error");
+            notifyJobFinished("cancelled", currentJob.value?.kind || null);
             return;
         }
         if (currentStatus.value === "failed") {
-            setMessage(currentJob.value?.error?.message || "Generation failed.", "error");
+            const message = currentJob.value?.error?.message || "Generation failed.";
+            setMessage(message, "error");
+            notifyJobFinished("failed", currentJob.value?.kind || null, message);
         }
     } catch (error) {
         if (version !== pollVersion) return;
@@ -527,6 +605,7 @@ async function generate(): Promise<void> {
                 throw new Error("The selected model does not support this generation mode.");
             loadingModel.value = false;
         }
+        await ensureNotificationPermission();
         const request = buildRequestBodyForMode(generationMode.value, {
             ...form,
             ...(generationMode.value === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
@@ -537,9 +616,12 @@ async function generate(): Promise<void> {
         clearMessage();
         selectedOutputIndex.value = 0;
         startElapsedTimer();
-        currentJob.value = generationMode.value === "video"
+        const job = generationMode.value === "video"
             ? await submitVideoJob(requestBase, request)
             : await submitImageJob(requestBase, request);
+        const ratio = Number(request.width) / Number(request.height);
+        submittedAspectRatio.value = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+        currentJob.value = job;
         await pollJob(currentJob.value.id);
     } catch (error) {
         stopElapsedTimer();
@@ -750,6 +832,7 @@ watch(videoOutputFormats, () => {
 });
 
 onMounted(() => {
+    refreshNotificationPermission();
     window.addEventListener("paste", onPaste);
     refreshCapabilities();
 });
@@ -818,6 +901,7 @@ onBeforeUnmount(() => {
                         <input v-model.number="pollIntervalMs" type="number" min="1" step="1" />
                     </div>
                 </div>
+                <PromptEnhancementSettings :enhancement="enhancement" />
                 <fieldset class="settings__group">
                     <legend>Model idle timeout (TTL)</legend>
                     <div class="settings__grid">
@@ -854,6 +938,12 @@ onBeforeUnmount(() => {
                     </div>
                 </fieldset>
 
+                <fieldset class="settings__group stack-top">
+                    <legend>Notifications</legend>
+                    <label class="checkbox"><input v-model="notifyOnCompletion" type="checkbox" :disabled="!notificationSupported" @change="onNotifyToggle" /><span>Notify me when generation finishes</span></label>
+                    <div class="hint stack-top">{{ notificationStatusMessage }}</div>
+                </fieldset>
+
                 <fieldset v-if="hasFeature('vae_tiling')" class="settings__group stack-top">
                     <legend>VAE Tiling</legend>
                     <label class="checkbox"><input v-model="form.vae_tiling_params.enabled" type="checkbox" /><span>Enabled</span></label>
@@ -885,62 +975,64 @@ onBeforeUnmount(() => {
         </section>
         <main v-show="!settingsOpen" class="studio-workspace">
             <section class="output-stage" aria-label="Generated output" @dragover="onReferenceDragover" @drop="onReferenceDrop">
-                <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
-                    <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
-                    <div class="hero-frame__preview-overlay">
-                        <span class="hero-frame__preview-label">Preview</span>
-                        <span class="hero-frame__preview-step">Pass {{ livePreviewPass }} · {{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
-                    </div>
-                </div>
-                <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
-                    <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
-                </div>
-                <button v-else-if="previewImageSrc" class="hero-frame hero-frame--button" type="button" @click="openLightbox(previewImageSrc, 'Generated output')">
-                    <img :src="previewImageSrc" alt="Generated output" />
-                </button>
-                <div v-else class="hero-frame hero-frame--empty">
-                    <div v-if="!modelReady || previewingRecipe" class="hero-placeholder hero-placeholder--model">
-                        <div aria-live="polite">
-                            <h2>{{ modelStatus?.state === 'loading' ? 'Loading your model' : 'Choose a model to get started' }}</h2>
-                            <p>{{ modelStatus?.state === 'loading'
-                                ? 'Your model is loading. You can prepare your prompt while you wait.'
-                                : 'Select a recipe and load its model, then bring your ideas to life.' }}</p>
+                <div class="output-canvas" :style="{ '--output-ratio': outputAspectRatio }">
+                    <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
+                        <img class="hero-frame__image" :src="livePreviewSrc" alt="Live preview" />
+                        <div class="hero-frame__preview-overlay">
+                            <span class="hero-frame__preview-label">Preview</span>
                         </div>
-                        <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">{{ modelStatus?.state === 'loading' ? 'View loading status' : 'Choose & load model' }}</button>
                     </div>
-                    <div v-else class="hero-placeholder">
-                        <h2>{{ generationMode === "video" ? "Imagine it in motion" : "Make room for imagination" }}</h2>
-                        <p>
-                            {{ generationMode === "video"
-                                ? "Describe a scene below, add a reference, and create your next video."
-                                : "Start with a few words. Your next image will appear here." }}
-                        </p>
+                    <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
+                        <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
                     </div>
-                </div>
-
-                <div v-if="currentJob" class="stage-footer">
-                    <div class="stage-status">
-                        <StatusChip :status="currentStatus" :label="currentJob.cancel_requested && isJobRunning ? 'Cancelling' : currentStatus" />
-                        <span>{{ formatElapsed(currentJob) }}</span>
-                        <span v-if="currentStatus === 'queued'">Queue {{ currentJob.queue_position ?? 0 }}</span>
-                        <span v-if="livePreviewSrc">{{ livePreviewStep }} / {{ livePreviewTotalSteps }} steps</span>
-                    </div>
-                    <div class="stage-actions">
-                        <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="generationDetails?.showModal()">Details</button>
-                        <button v-if="downloadableSrc" class="btn-secondary" type="button" @click="downloadSelected">Download</button>
-                    </div>
-                </div>
-
-                <div v-if="statusMessage && statusTone !== 'success'" class="status-message stage-message" role="status" :class="statusTone === 'error' ? 'status-message--error' : ''">{{ statusMessage }}</div>
-                <div v-else-if="currentJob?.error?.message" class="status-message status-message--error stage-message" role="alert">{{ currentJob.error.message }}</div>
-
-                <div v-if="currentImages.length > 1" class="thumb-row">
-                    <button v-for="(image, index) in currentImages" :key="image.index" class="thumb" :class="{ 'thumb--active': index === selectedOutputIndex }" type="button" @click="selectOutput(index)">
-                        <img :src="`data:image/${currentJob?.result?.output_format || 'png'};base64,${image.b64_json}`" :alt="`Output ${index + 1}`" />
+                    <button v-else-if="previewImageSrc" class="hero-frame hero-frame--button" type="button" @click="openLightbox(previewImageSrc, 'Generated output')">
+                        <img :src="previewImageSrc" alt="Generated output" />
                     </button>
+                    <div v-else class="hero-frame hero-frame--empty">
+                        <div v-if="!modelReady || previewingRecipe" class="hero-placeholder hero-placeholder--model">
+                            <div aria-live="polite">
+                                <h2>{{ modelStatus?.state === 'loading' ? 'Loading your model' : 'Choose a model to get started' }}</h2>
+                                <p>{{ modelStatus?.state === 'loading'
+                                    ? 'Your model is loading. You can prepare your prompt while you wait.'
+                                    : 'Select a recipe and load its model, then bring your ideas to life.' }}</p>
+                            </div>
+                            <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">{{ modelStatus?.state === 'loading' ? 'View loading status' : 'Choose & load model' }}</button>
+                        </div>
+                        <div v-else class="hero-placeholder">
+                            <h2>{{ generationMode === "video" ? "Imagine it in motion" : "Make room for imagination" }}</h2>
+                            <p>
+                                {{ generationMode === "video"
+                                    ? "Describe a scene below, add a reference, and create your next video."
+                                    : "Start with a few words. Your next image will appear here." }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="canvas-overlays">
+                        <div v-if="statusMessage && statusTone !== 'success'" class="status-message stage-message" role="status" :class="statusTone === 'error' ? 'status-message--error' : ''">{{ statusMessage }}</div>
+                        <div v-else-if="currentJob?.error?.message" class="status-message status-message--error stage-message" role="alert">{{ currentJob.error.message }}</div>
+
+                        <div v-if="currentImages.length > 1" class="thumb-row">
+                            <button v-for="(image, index) in currentImages" :key="image.index" class="thumb" :class="{ 'thumb--active': index === selectedOutputIndex }" type="button" @click="selectOutput(index)">
+                                <img :src="`data:image/${currentJob?.result?.output_format || 'png'};base64,${image.b64_json}`" :alt="`Output ${index + 1}`" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stage-footer">
+                    <GenerationProgress v-if="currentJob" :job="currentJob" :now="nowMilliseconds">
+                        <template #actions>
+                            <div class="stage-actions">
+                                <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="generationDetails?.showModal()">Details</button>
+                                <button v-if="downloadableSrc" class="btn-secondary" type="button" @click="downloadSelected">Download</button>
+                            </div>
+                        </template>
+                    </GenerationProgress>
                 </div>
             </section>
             <PromptComposer ref="composer" :form="form" :mode="generationMode" :model-label="selectedRecipe?.name || (modelReady ? modelName : 'Choose model')"
+                :enhancement="enhancement" @enhancement-settings="openEnhancementSettings"
                 :model-ready="selectionReady" :load-required="needsModelLoad" :submitting="submitting" :loading-model="loadingModel" :disabled="!canGenerate || mediaProcessing || submitting || (generationMode === 'video' && Boolean(videoLength.error))" :busy="isJobRunning"
                 :video-summary="videoLength.summary" :video-details="videoLength.details"
                 :can-cancel="canCancelCurrentJob" :cancelling="cancelling || Boolean(currentJob?.cancel_requested)"
