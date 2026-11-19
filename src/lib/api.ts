@@ -76,3 +76,10 @@ export function loadModel(baseUrl: string, recipe: string, models: Record<string
 export function unloadModel(baseUrl: string): Promise<ModelStatus> {
     return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/unload"), { method: "POST" });
 }
+
+export function setModelTTL(baseUrl: string, seconds: number): Promise<ModelStatus> {
+    return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/settings"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sleep_idle_seconds: seconds }),
+    });
+}

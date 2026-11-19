@@ -15,6 +15,9 @@ const props = defineProps<{
     mode: GenerationMode;
     modelLabel: string;
     modelReady: boolean;
+    loadRequired?: boolean;
+    submitting?: boolean;
+    loadingModel?: boolean;
     disabled: boolean;
     busy: boolean;
     canCancel: boolean;
@@ -42,7 +45,8 @@ const showNegativePrompt = computed(() => props.form.sample_params.guidance.txt_
 const titles: Record<string, string> = { models: "Model", resolution: "Aspect Ratio & Resolution", output: "Output", lora: "LoRA", sample: "Sample & Guidance", advanced: "More settings" };
 const size = computed(() => ({ width: props.form.width, height: props.form.height }));
 const sizeError = computed(() => dimensionError(size.value, props.limits, props.sizeMultiple));
-const buttonLabel = computed(() => props.busy ? "Generating…" : "Generate");
+const buttonLabel = computed(() => props.loadingModel ? "Loading model…" : props.submitting ? "Submitting…" :
+    props.busy ? "Generating…" : props.loadRequired ? "Load & Generate" : "Generate");
 const seedLabel = computed(() => props.form.seed < 0 ? "Random" : String(props.form.seed));
 const seedSummary = computed(() => seedLabel.value.length > 10
     ? `${seedLabel.value.slice(0, 6)}…${seedLabel.value.slice(-4)}`

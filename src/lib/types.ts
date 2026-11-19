@@ -229,13 +229,15 @@ export interface Job {
 export type CacheMode = (typeof CACHE_MODES)[number];
 
 export interface ModelStatus {
-  state: "empty" | "loading" | "ready" | "error";
+  state: "empty" | "loading" | "ready" | "sleeping" | "error";
   recipe: string | null;
   models: Record<string, string>;
   error: string | null;
   revision?: number;
   origin?: string;
   runtime_recipe?: Recipe;
+  command_line_recipe?: Recipe;
+  sleep_idle_seconds?: number;
   load_elapsed_seconds?: number | null;
 }
 export interface RecipeDefaults {

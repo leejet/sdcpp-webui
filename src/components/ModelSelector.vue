@@ -14,6 +14,7 @@ const emit = defineEmits<{
     (event: "recipe", value: Recipe): void;
     (event: "selection", value: Record<string, string>): void;
     (event: "catalogRecipe", value: Recipe | null): void;
+    (event: "loadable", value: boolean): void;
 }>();
 const applyDefaults = computed({
     get: () => props.applyDefaults,
@@ -23,8 +24,9 @@ const recipes = ref<Recipe[]>([]);
 const files = ref<ModelFile[]>([]);
 const catalogErrors = ref<CatalogError[]>([]);
 const status = ref<ModelStatus | null>(null);
-const availableRecipes = computed(() => status.value?.runtime_recipe
-    ? [status.value.runtime_recipe, ...recipes.value] : recipes.value);
+const commandLineRecipe = computed(() => status.value?.command_line_recipe || status.value?.runtime_recipe);
+const availableRecipes = computed(() => commandLineRecipe.value
+    ? [commandLineRecipe.value, ...recipes.value] : recipes.value);
 const selectedId = ref("");
 const selection = ref<Record<string, string>>({});
 interface SavedModelSelection {
@@ -81,8 +83,9 @@ const missingRequiredGroups = computed(() => (recipe.value?.required_any || [])
         label: group.map((id) => recipe.value?.slots.find((slot) => slot.id === id)?.label || id).join(" or "),
     })));
 const disabled = computed(() => props.busy || working.value || status.value?.state === "loading");
-const complete = computed(() => recipe.value && recipe.value.source !== "command_line" && recipe.value.slots.every((slot) =>
-    !slot.required || slotSelected(slot.id)) && !missingRequiredGroups.value.length);
+const complete = computed(() => Boolean(recipe.value && (recipe.value.source === "command_line" ||
+    (recipe.value.slots.every((slot) => !slot.required || slotSelected(slot.id)) && !missingRequiredGroups.value.length))));
+watch(complete, (value) => emit("loadable", value), { immediate: true });
 function slotSelected(id: string): boolean {
     const slot = recipe.value?.slots.find((item) => item.id === id);
     return !!slot && filesForSlot(slot).some((file) => file.id === selection.value[id]);
@@ -113,7 +116,7 @@ function acceptStatus(next: ModelStatus): void {
     previousActiveRecipe = next.recipe;
     status.value = next;
     emit("status", next);
-    if (selectedId.value === "@command-line" && !next.runtime_recipe) {
+    if (selectedId.value === "@command-line" && !commandLineRecipe.value) {
         selectedId.value = next.recipe || "";
         restoreSelection();
         emit("catalogRecipe", recipe.value || null);
