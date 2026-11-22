@@ -286,3 +286,26 @@ export interface Recipe {
 }
 export interface ModelFile { id: string; name?: string; category: string; }
 export interface CatalogError { file: string; message: string; }
+export interface DglOutput {
+    name: string;
+    dtype: number;
+    shape: number[];
+    bytes: number;
+    frames: number;
+    value?: string | number | null;
+}
+
+export interface DglMedia {
+    name: string;
+    mime_type: "image/png" | "video/webm" | "video/x-msvideo";
+    b64_json?: string;
+    error?: { code: string; message: string };
+}
+
+export interface DglJob {
+    id: string;
+    status: "queued" | "generating" | "completed" | "failed" | "cancelled";
+    queue_position: number;
+    result: { type: string; outputs: DglOutput[]; media: DglMedia[] } | null;
+    error: { code: string; message: string } | null;
+}

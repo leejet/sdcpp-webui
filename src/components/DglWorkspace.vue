@@ -1,0 +1,357 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { getDglJob, listDglScripts, loadDglScript, saveDglScript, dglPreviewUrl, submitDglJob } from "../lib/api";
+import type { DglJob } from "../lib/types";
+
+const starter = '# version: 0.0.0\n\nfn main() {\n    return "Hello, DGL"\n}\n';
+const directory = ref("");
+const files = ref<string[]>([]);
+const name = ref("untitled.dgl");
+const source = ref(starter);
+const openedName = ref("");
+const cleanName = ref(name.value);
+const cleanSource = ref(source.value);
+const busy = ref(false);
+const fileError = ref("");
+const running = ref(false);
+const runError = ref("");
+const job = ref<DglJob | null>(null);
+const editor = ref<HTMLTextAreaElement>();
+const highlight = ref<HTMLPreElement>();
+const gutter = ref<HTMLElement>();
+const frameNumbers = ref<Record<number, number>>({});
+const inspectFrames = ref<Record<number, boolean>>({});
+let runAbort: AbortController | undefined;
+
+const modified = computed(() => name.value !== cleanName.value || source.value !== cleanSource.value);
+const lineCount = computed(() => source.value.split("\n").length);
+const tokens = computed(() => {
+    const parts: { text: string; kind?: string }[] = [];
+    const pattern = /(?<comment>#[^\r\n]*|\/\/[^\r\n]*)|(?<string>"(?:\\[^\r\n]|[^"\\\r\n])*"?)|(?<keyword>\b(?:fn|return|true|false)\b)|(?<number>-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(?<call>\b[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*(?=\s*\())|\b[a-zA-Z_]\w*/g;
+    let offset = 0;
+    for (const match of source.value.matchAll(pattern)) {
+        const start = match.index ?? 0;
+        if (start > offset) parts.push({ text: source.value.slice(offset, start) });
+        const kind = Object.keys(match.groups ?? {}).find((group) => match.groups?.[group] !== undefined);
+        parts.push({ text: match[0], kind });
+        offset = start + match[0].length;
+    }
+    parts.push({ text: source.value.slice(offset) + "\n" });
+    return parts;
+});
+
+const dtypeNames: Record<number, string> = { 1: "u8", 2: "i32", 3: "i64", 4: "f32", 5: "f64" };
+
+function describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+async function fileAction(action: () => Promise<void>): Promise<void> {
+    if (busy.value) return;
+    busy.value = true;
+    fileError.value = "";
+    try {
+        await action();
+    } catch (error) {
+        fileError.value = describeError(error);
+    } finally {
+        busy.value = false;
+    }
+}
+
+function setDocument(file: string, text: string, saved: boolean): void {
+    name.value = file;
+    cleanName.value = file;
+    source.value = text;
+    cleanSource.value = text;
+    openedName.value = saved ? file : "";
+    if (editor.value) {
+        editor.value.scrollTop = 0;
+        editor.value.scrollLeft = 0;
+        syncScroll();
+    }
+}
+
+function nextName(stem: string): string {
+    let next = stem + ".dgl";
+    for (let count = 2; files.value.some((file) => file.toLowerCase() === next.toLowerCase()); ++count) {
+        next = stem + "-" + count + ".dgl";
+    }
+    return next;
+}
+
+function refreshFiles(): Promise<void> {
+    return fileAction(async () => {
+        const response = await listDglScripts();
+        directory.value = response.directory;
+        files.value = response.scripts;
+        if (!openedName.value && !modified.value && name.value === "untitled.dgl") {
+            setDocument(nextName("untitled"), source.value, false);
+        }
+    });
+}
+
+function mayReplaceDocument(): boolean {
+    return !modified.value || window.confirm("Discard unsaved changes?");
+}
+
+function newScript(): void {
+    if (!mayReplaceDocument()) return;
+    fileError.value = "";
+    setDocument(nextName("untitled"), starter, false);
+    editor.value?.focus();
+}
+
+function openScript(file: string): Promise<void> | undefined {
+    if (file === openedName.value || !mayReplaceDocument()) return;
+    return fileAction(async () => {
+        const response = await loadDglScript(file);
+        setDocument(file, response.source, true);
+    });
+}
+
+function saveScript(duplicate = false): Promise<void> {
+    return fileAction(async () => {
+        const requested = name.value.trim();
+        const target = duplicate
+            ? nextName(openedName.value.slice(0, -".dgl".length) + "-copy")
+            : requested.endsWith(".dgl") ? requested : requested + ".dgl";
+        const text = source.value;
+        const saved = await saveDglScript(target, text, target === openedName.value ? cleanSource.value : undefined);
+        if (!files.value.includes(saved.name)) files.value = [...files.value, saved.name].sort();
+        setDocument(saved.name, text, true);
+    });
+}
+
+function syncScroll(): void {
+    if (!editor.value || !highlight.value || !gutter.value) return;
+    highlight.value.scrollTop = editor.value.scrollTop;
+    highlight.value.scrollLeft = editor.value.scrollLeft;
+    gutter.value.scrollTop = editor.value.scrollTop;
+}
+
+function editKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void runScript();
+    }
+    if (event.key === "s" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        if (name.value.trim()) void saveScript();
+    }
+}
+
+async function runScript(): Promise<void> {
+    if (running.value || !source.value.trim()) return;
+    const abort = new AbortController();
+    runAbort = abort;
+    running.value = true;
+    job.value = null;
+    runError.value = "";
+    frameNumbers.value = {};
+    inspectFrames.value = {};
+    try {
+        let status = await submitDglJob(source.value, abort.signal);
+        while (!abort.signal.aborted) {
+            job.value = status;
+            if (status.status !== "queued" && status.status !== "generating") break;
+            await new Promise((resolve) => window.setTimeout(resolve, 400));
+            if (!abort.signal.aborted) status = await getDglJob(status.id, abort.signal);
+        }
+    } catch (error) {
+        if (!abort.signal.aborted) runError.value = describeError(error);
+    } finally {
+        running.value = false;
+    }
+}
+
+onMounted(refreshFiles);
+onBeforeUnmount(() => runAbort?.abort());
+</script>
+
+<template>
+    <main class="dgl-workspace" aria-label="DGL workspace">
+        <aside class="panel dgl-files" aria-label="Script files">
+            <div class="dgl-heading">
+                <h1>DGL scripts</h1>
+                <button class="btn-secondary" type="button" :disabled="busy" @click="newScript">New</button>
+            </div>
+            <div class="dgl-directory">
+                <code :title="directory">{{ directory }}</code>
+                <button class="btn-ghost" type="button" :disabled="busy" @click="refreshFiles">Refresh</button>
+            </div>
+            <ul v-if="files.length">
+                <li v-for="file in files" :key="file">
+                    <button class="dgl-file" type="button" :aria-current="openedName === file ? 'true' : undefined" :disabled="busy" @click="openScript(file)">{{ file }}</button>
+                </li>
+            </ul>
+            <p v-else-if="!busy && !fileError">No saved scripts.</p>
+        </aside>
+
+        <section class="panel dgl-editor" aria-label="Script editor" @keydown="editKeydown">
+            <div class="dgl-toolbar">
+                <label for="dgl-file-name">File name</label>
+                <input id="dgl-file-name" v-model="name" :disabled="busy" autocomplete="off" />
+                <span v-if="modified || !openedName" class="dgl-unsaved">Unsaved</span>
+                <div class="dgl-toolbar__actions">
+                    <button class="btn-secondary" type="button" :disabled="busy || !openedName" @click="saveScript(true)">Duplicate</button>
+                    <button class="btn-secondary" type="button" :disabled="busy || !name.trim()" @click="saveScript()">Save</button>
+                    <button class="btn" type="button" :disabled="running || !source.trim()" @click="runScript">{{ running ? 'Running…' : 'Run' }}</button>
+                </div>
+            </div>
+            <p v-if="fileError" class="status-message status-message--error" role="alert">{{ fileError }}</p>
+            <div class="dgl-code">
+                <div ref="gutter" class="dgl-gutter" aria-hidden="true"><div v-for="line in lineCount" :key="line">{{ line }}</div></div>
+                <div class="dgl-code-buffer">
+                    <pre ref="highlight" aria-hidden="true"><span v-for="(token, index) in tokens" :key="index" :class="token.kind">{{ token.text }}</span></pre>
+                    <textarea ref="editor" v-model="source" aria-label="DGL source" :readonly="busy" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" @scroll="syncScroll" />
+                </div>
+            </div>
+        </section>
+
+        <section class="panel dgl-output" aria-label="Script output">
+            <div class="dgl-heading">
+                <h2>Results</h2>
+                <span v-if="job?.result" class="dgl-unsaved">{{ job.result.type }}</span>
+            </div>
+            <p v-if="running" role="status">{{ job?.status === 'queued' ? 'Queued · Position ' + job.queue_position : 'Running script…' }}</p>
+            <p v-else-if="runError || job?.error" class="status-message status-message--error" role="alert">{{ runError || job?.error?.message }}</p>
+            <template v-else-if="job?.result">
+                <p v-if="!job.result.outputs.length && !job.result.media.length">The script returned no displayable values.</p>
+                <article v-for="media in job.result.media" :key="media.name" class="dgl-result">
+                    <h3>{{ media.name }}</h3>
+                    <p v-if="media.error" class="status-message status-message--error">{{ media.error.message }}</p>
+                    <template v-else-if="media.b64_json">
+                        <img v-if="media.mime_type === 'image/png'" :src="`data:${media.mime_type};base64,${media.b64_json}`" :alt="media.name" />
+                        <video v-else-if="media.mime_type === 'video/webm'" :src="`data:${media.mime_type};base64,${media.b64_json}`" controls preload="metadata" />
+                        <a :href="`data:${media.mime_type};base64,${media.b64_json}`" :download="media.name + (media.mime_type === 'image/png' ? '.png' : media.mime_type === 'video/webm' ? '.webm' : '.avi')">Download {{ media.name }}</a>
+                    </template>
+                </article>
+                <article v-for="(output, index) in job.result.outputs" :key="output.name" class="dgl-result">
+                    <h3>{{ output.name }}</h3>
+                    <div class="dgl-result__shape"><code>{{ dtypeNames[output.dtype] ?? output.dtype }} [{{ output.shape.join(', ') }}]</code><span>{{ output.bytes.toLocaleString() }} B</span></div>
+                    <button v-if="output.frames" class="btn-secondary" type="button" @click="inspectFrames[index] = !inspectFrames[index]">{{ inspectFrames[index] ? 'Hide tensor frames' : 'Inspect tensor frames' }}</button>
+                    <img v-if="inspectFrames[index] && output.frames" :src="dglPreviewUrl(job.id, index, frameNumbers[index] ?? 0)" :alt="output.name" loading="lazy" />
+                    <label v-if="inspectFrames[index] && output.frames > 1" class="dgl-frames">
+                        <span>Frame {{ (frameNumbers[index] ?? 0) + 1 }} of {{ output.frames }}</span>
+                        <input type="range" min="0" :max="output.frames - 1" :value="frameNumbers[index] ?? 0"
+                            @change="frameNumbers[index] = Number(($event.target as HTMLInputElement).value)" />
+                    </label>
+                    <pre v-if="output.value !== undefined">{{ output.value }}</pre>
+                </article>
+            </template>
+            <p v-else>Run a script to see its output.</p>
+        </section>
+    </main>
+</template>
+
+<style scoped>
+.dgl-workspace {
+    display: grid;
+    grid-template-columns: minmax(172px, 0.8fr) minmax(0, 3fr) minmax(220px, 1.35fr);
+    align-items: start;
+    gap: 14px;
+    margin: 22px 0 0;
+}
+.dgl-workspace > .panel { min-width: 0; padding: 14px; }
+.dgl-heading, .dgl-toolbar, .dgl-directory, .dgl-toolbar__actions, .dgl-result__shape {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.dgl-heading, .dgl-directory, .dgl-result__shape { justify-content: space-between; }
+.dgl-heading h1, .dgl-heading h2 { margin: 0; font-size: 15px; }
+.dgl-directory { margin: 6px 0; font-size: 12px; color: var(--muted); }
+.dgl-directory code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgl-files ul { padding: 0; margin: 0; list-style: none; max-height: 67dvh; overflow: auto; }
+.dgl-file {
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    text-align: left;
+    display: block;
+    padding: 7px 8px;
+    width: 100%;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+.dgl-file:hover, .dgl-file[aria-current] { background: var(--select-option-selected-bg); }
+.dgl-toolbar { flex-wrap: wrap; }
+.dgl-toolbar label, .dgl-unsaved { font-size: 12px; color: var(--muted); }
+.dgl-toolbar > input { flex: 1; min-width: 120px; }
+.dgl-toolbar__actions { margin-left: auto; }
+.dgl-workspace p { font-size: 13px; }
+.dgl-code {
+    --code-comment: #64748b;
+    --code-keyword: #7439a6;
+    --code-string: #086c61;
+    --code-number: #a13e24;
+    --code-call: #2151a3;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    margin-top: 12px;
+    height: clamp(380px, 67dvh, 1000px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    overflow: hidden;
+}
+:global([data-theme="dark"]) .dgl-code {
+    --code-comment: #9ca3af;
+    --code-keyword: #c4a5f6;
+    --code-string: #89d6b7;
+    --code-number: #f2aa84;
+    --code-call: #9bbdff;
+}
+.dgl-code:focus-within { border-color: var(--focus-border); }
+.dgl-gutter, .dgl-code-buffer > :is(pre, textarea) {
+    padding: 12px;
+    font: 13px/21px var(--font-mono);
+    font-variant-ligatures: none;
+    tab-size: 4;
+    letter-spacing: normal;
+    margin: 0;
+}
+.dgl-gutter { overflow: hidden; padding-bottom: 32px; text-align: right; color: var(--muted); background: var(--panel-subtle); }
+.dgl-code-buffer { position: relative; min-width: 0; }
+.dgl-code-buffer > :is(pre, textarea) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    white-space: pre;
+    overflow: scroll;
+}
+.dgl-code-buffer pre { pointer-events: none; scrollbar-color: transparent transparent; }
+.dgl-code-buffer textarea { resize: none; color: transparent; caret-color: var(--text); outline: none; box-shadow: none; }
+.dgl-code-buffer textarea::selection { color: transparent; background: #6388dd40; }
+.dgl-code-buffer .comment { color: var(--code-comment); }
+.dgl-code-buffer .keyword { color: var(--code-keyword); }
+.dgl-code-buffer .string { color: var(--code-string); }
+.dgl-code-buffer .number { color: var(--code-number); }
+.dgl-code-buffer .call { color: var(--code-call); }
+.dgl-result { padding: 12px 0; border-top: 1px solid var(--border); }
+.dgl-result:first-of-type { margin-top: 12px; }
+.dgl-result h3 { font: 600 13px var(--font-mono); margin: 0 0 6px; overflow-wrap: anywhere; }
+.dgl-result__shape { font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.dgl-result img, .dgl-result video { width: 100%; max-height: 360px; object-fit: contain; margin-top: 8px; border-radius: 6px; background: var(--panel-subtle); }
+.dgl-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 var(--font-mono); margin: 8px 0 0; }
+.dgl-frames { display: grid; gap: 4px; margin-top: 8px; font-size: 12px; }
+@media (max-width: 1050px) {
+    .dgl-workspace { grid-template-columns: minmax(150px, 1fr) minmax(0, 4fr); }
+    .dgl-output { grid-column: 2; }
+    .dgl-result img { width: auto; max-width: 100%; }
+}
+@media (max-width: 620px) {
+    .dgl-workspace { grid-template-columns: minmax(0, 1fr); }
+    .dgl-output { grid-column: auto; }
+    .dgl-files ul { max-height: 148px; }
+}
+@media (forced-colors: active) {
+    .dgl-code-buffer pre { visibility: hidden; }
+    .dgl-code-buffer textarea { color: CanvasText; }
+}
+</style>

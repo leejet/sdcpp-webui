@@ -1,4 +1,4 @@
-import type { Capabilities, Job, Recipe, ModelFile, ModelStatus, CatalogError } from "./types";
+import type { Capabilities, Job, Recipe, ModelFile, ModelStatus, CatalogError, DglJob } from "./types";
 
 function withBase(baseUrl: string, path: string): string {
     const base = String(baseUrl || window.location.pathname).trim().replace(/\/+$/, "");
@@ -75,4 +75,39 @@ export function loadModel(baseUrl: string, recipe: string, models: Record<string
 }
 export function unloadModel(baseUrl: string): Promise<ModelStatus> {
     return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/unload"), { method: "POST" });
+}
+
+const dglPath = "/sdcpp/v1/dgl";
+
+export function listDglScripts(): Promise<{ directory: string; scripts: string[] }> {
+    return fetchJson(withBase("", dglPath + "/scripts"), { cache: "no-store" });
+}
+
+export function loadDglScript(name: string): Promise<{ source: string }> {
+    return fetchJson(withBase("", dglPath + "/script?" + new URLSearchParams({ name })), { cache: "no-store" });
+}
+
+export function saveDglScript(name: string, source: string, previousSource?: string): Promise<{ name: string }> {
+    return fetchJson(withBase("", dglPath + "/script"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, source, previous_source: previousSource }),
+    });
+}
+
+export function submitDglJob(source: string, signal: AbortSignal): Promise<DglJob> {
+    return fetchJson(withBase("", dglPath + "/jobs"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+        signal,
+    });
+}
+
+export function getDglJob(id: string, signal: AbortSignal): Promise<DglJob> {
+    return fetchJson(withBase("", `${dglPath}/jobs/${encodeURIComponent(id)}`), { cache: "no-store", signal });
+}
+
+export function dglPreviewUrl(id: string, output: number, frame: number): string {
+    return withBase("", `${dglPath}/jobs/${encodeURIComponent(id)}/outputs/${output}?frame=${frame}`);
 }

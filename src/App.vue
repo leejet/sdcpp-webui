@@ -13,6 +13,7 @@ import SearchableSelect from "./components/SearchableSelect.vue";
 import MediaDropzone from "./components/MediaDropzone.vue";
 import StatusChip from "./components/StatusChip.vue";
 import GenerationProgress from "./components/GenerationProgress.vue";
+import DglWorkspace from "./components/DglWorkspace.vue";
 import { cancelJob, getCapabilities, getJob, submitImageJob, submitVideoJob } from "./lib/api";
 import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFromCapabilities } from "./lib/form";
 import { availableCacheModes, featuresForMode, supportsEta, supportsFlowShift, usesSCM } from "./lib/generation-features";
@@ -61,6 +62,8 @@ const notificationStatusMessage = computed(() => {
     return "Browser permission is needed before notifications can be shown.";
 });
 const settingsOpen = ref(false);
+const dglOpen = ref(false);
+const dglVisited = ref(false);
 const { theme, resolvedTheme, toggleTheme } = useTheme();
 const themeToggleLabel = computed(() => resolvedTheme.value === "dark" ? "Switch to light mode" : "Switch to dark mode");
 const generationMode = ref<GenerationMode>("image");
@@ -462,6 +465,13 @@ async function onNotifyToggle(): Promise<void> {
     }
 }
 
+function toggleDgl(): void {
+    composer.value?.close();
+    settingsOpen.value = false;
+    dglOpen.value = !dglOpen.value;
+    if (dglOpen.value) dglVisited.value = true;
+}
+
 async function openEnhancementSettings(): Promise<void> {
     composer.value?.close();
     settingsOpen.value = true;
@@ -788,9 +798,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="shell studio-shell" :class="{ 'studio-shell--creating': !settingsOpen }">
+    <div class="shell studio-shell" :class="{ 'studio-shell--creating': !settingsOpen && !dglOpen }">
         <header class="studio-header">
-            <a class="studio-brand" href="#" aria-label="stable-diffusion.cpp home" @click.prevent="settingsOpen = false"><img class="studio-brand__mark" :src="brandIcon" alt="" /><span>stable-diffusion.cpp</span></a>
+            <a class="studio-brand" href="#" aria-label="stable-diffusion.cpp home" @click.prevent="settingsOpen = false; dglOpen = false"><img class="studio-brand__mark" :src="brandIcon" alt="" /><span>stable-diffusion.cpp</span></a>
             <div class="studio-header__actions">
                 <StatusChip :status="serviceOnline ? 'online' : 'offline'" :label="serviceOnline ? 'Online' : 'Offline'" />
                 <button class="btn-ghost studio-theme-toggle" type="button" :aria-label="themeToggleLabel" :title="themeToggleLabel" @click="toggleTheme">
@@ -802,6 +812,7 @@ onBeforeUnmount(() => {
                         <path v-else d="M20.9 13.3A9 9 0 0 1 10.7 3.1a9 9 0 1 0 10.2 10.2Z" />
                     </svg>
                 </button>
+                <button class="btn-ghost" type="button" :aria-pressed="dglOpen && !settingsOpen" @click="toggleDgl">DGL</button>
                 <button class="btn-ghost" type="button" :aria-pressed="settingsOpen" @click="openSettings">Settings</button>
             </div>
         </header>
@@ -899,7 +910,8 @@ onBeforeUnmount(() => {
                 <div v-if="capabilitiesError" class="status-message status-message--error">{{ capabilitiesError }}</div>
             </div>
         </section>
-        <main v-show="!settingsOpen" class="studio-workspace">
+        <DglWorkspace v-if="dglVisited" v-show="dglOpen && !settingsOpen" />
+        <main v-show="!settingsOpen && !dglOpen" class="studio-workspace">
             <section class="output-stage" aria-label="Generated output" @dragover="onReferenceDragover" @drop="onReferenceDrop">
                 <div class="output-canvas" :style="{ '--output-ratio': outputAspectRatio }">
                     <div v-if="livePreviewSrc" class="hero-frame hero-frame--media hero-frame--preview">
