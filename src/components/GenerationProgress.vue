@@ -9,6 +9,7 @@ watch(() => props.job, () => { receivedAt.value = Date.now(); });
 const stages: Record<string, string> = {
     queued: "Queued",
     waiting: "Waiting for execution",
+    loading: "Loading model components",
     preparing: "Preparing generation",
     conditioning: "Encoding prompt",
     sampling: "Sampling",

@@ -38,8 +38,10 @@ The current UI supports:
 ## Creation Workspace
 
 The workspace uses a central output stage and a bottom prompt composer.
-Selecting a recipe determines whether to generate images or video; command-line
-models use the server's reported mode. Buttons below the prompt open model selection, LoRAs, a combined
+Selecting a recipe determines whether to generate images or video. Command-line
+models use the server's reported mode. Select the required model files and click
+**Generate** to submit one job that loads its components as needed.
+Buttons below the prompt open model selection, LoRAs, a combined
 aspect-ratio and resolution panel, output options, reference inputs, a dedicated
 Sample & Guidance panel, and advanced settings. The sample panel also contains
 high-noise sampling and guidance when supported. The LoRA button sits beside the model button.

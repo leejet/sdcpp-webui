@@ -14,7 +14,7 @@ const props = defineProps<{
     enhancement: PromptEnhancement;
     mode: GenerationMode;
     modelLabel: string;
-    modelReady: boolean;
+    modelSelected: boolean;
     disabled: boolean;
     busy: boolean;
     canCancel: boolean;
@@ -168,7 +168,7 @@ defineExpose({
 
         <div class="composer-toolbar">
             <div class="composer-toolbar__options">
-                <button class="composer-chip composer-chip--model" type="button" :aria-expanded="activePanel === 'models'" aria-controls="composer-panel" @click="open('models', $event)"><span class="model-dot" :class="{ 'model-dot--ready': modelReady }" aria-hidden="true"></span><span>{{ modelLabel }}</span><ChevronIcon class="composer-chevron" /></button>
+                <button class="composer-chip composer-chip--model" type="button" :aria-expanded="activePanel === 'models'" aria-controls="composer-panel" @click="open('models', $event)"><span class="model-dot" :class="{ 'model-dot--ready': modelSelected }" aria-hidden="true"></span><span>{{ modelLabel }}</span><ChevronIcon class="composer-chevron" /></button>
                 <button v-if="hasLoras" class="composer-chip" type="button" :aria-expanded="activePanel === 'lora'" aria-controls="composer-panel" @click="open('lora', $event)">LoRA<span v-if="loraCount"> · {{ loraCount }}</span></button>
                 <button class="composer-chip" type="button" aria-label="Aspect Ratio and Resolution" :aria-expanded="activePanel === 'resolution'" aria-controls="composer-panel" @click="open('resolution', $event)"><span class="toolbar-ratio" aria-hidden="true"></span>{{ aspectLabel(size, sizeMultiple) }} · {{ sizeError ? 'Custom size' : `${form.width} × ${form.height}` }} <ChevronIcon class="composer-chevron" /></button>
                 <button class="composer-chip composer-chip--sample" type="button" :title="samplingTitle" :aria-label="`Sample & Guidance. ${samplingTitle}`" :aria-expanded="activePanel === 'sample'" aria-controls="composer-panel" @click="open('sample', $event)"><span class="composer-chip__summary">{{ samplingSummary }}</span><ChevronIcon class="composer-chevron" /></button>
@@ -181,7 +181,7 @@ defineExpose({
         <div class="composer-caption" aria-live="polite">
             <span v-if="sizeError" class="composer-error">{{ sizeError }}</span>
             <span v-else-if="busy">Generation in progress. You can prepare the next prompt.</span>
-            <span v-else-if="modelReady">{{ mode === 'video' ? 'Video' : 'Image' }} generation</span>
+            <span v-else-if="modelSelected">{{ mode === 'video' ? 'Video' : 'Image' }} generation</span>
             <span class="composer-shortcut">Ctrl / ⌘ + Enter</span>
         </div>
     </section>

@@ -26,7 +26,6 @@ import { useMediaInput } from "./lib/media-input";
 import { usePromptEnhancement } from "./lib/prompt-enhancement";
 import type {
     Capabilities,
-    ModelStatus,
     Recipe,
     GenerationForm,
     GenerationFeatures,
@@ -88,12 +87,12 @@ const loadingCapabilities = ref(false);
 const capabilitiesError = ref("");
 const serviceOnline = ref(false);
 const capabilities = ref<Capabilities | null>(null);
-const modelStatus = ref<ModelStatus | null>(null);
 const selectedRecipe = ref<Recipe | null>(null);
 const dimensionMultiple = computed(() => sizeMultiple(selectedRecipe.value?.size_multiple));
 const applyRecipeDefaultsOnSelect = createStoredRef<boolean>("sdcpp-webui-apply-recipe-defaults", true, (value: unknown) => typeof value === "boolean" ? value : true);
 const modelSelection = ref<Record<string, string>>({});
-const modelReady = computed(() => modelStatus.value ? modelStatus.value.state === "ready" : Boolean(capabilities.value?.model?.name));
+const modelSelectionComplete = ref(false);
+const defaultModelConfigured = computed(() => Boolean(capabilities.value?.model?.name));
 const currentJob = ref<Job | null>(null);
 const selectedOutputIndex = ref(0);
 const submittedAspectRatio = ref<number | null>(null);
@@ -122,24 +121,23 @@ const nowMilliseconds = ref(Date.now());
 
 const modelName = computed(() => {
     const model = capabilities.value?.model;
-    return model?.stem || model?.name || "No model loaded";
+    return model?.stem || model?.name || "No default model";
 });
 
 const supportedModes = computed(() => capabilities.value?.supported_modes || []);
-const loadedRecipeId = computed(() => modelStatus.value?.runtime_recipe?.id || modelStatus.value?.recipe);
-const loras = useLoraSelection(baseUrl, computed(() => selectedRecipe.value?.id || loadedRecipeId.value || undefined));
+const useSelectedRecipe = computed(() => selectedRecipe.value?.source === "builtin" || selectedRecipe.value?.source === "user");
+const loras = useLoraSelection(baseUrl, computed(() => useSelectedRecipe.value ? selectedRecipe.value?.id : capabilities.value?.runtime?.recipe ?? capabilities.value?.runtime?.runtime_recipe?.id));
 const recipeMode = computed<GenerationMode>(() => {
-    if (selectedRecipe.value && selectedRecipe.value.source !== "command_line") {
+    if (useSelectedRecipe.value && selectedRecipe.value) {
         return selectedRecipe.value.defaults?.video_frames !== undefined ? "video" : "image";
     }
     const mode = capabilities.value?.current_mode || (supportedModes.value.length === 1 ? supportedModes.value[0] : "img_gen");
     return mode === "vid_gen" ? "video" : "image";
 });
-const previewingRecipe = computed(() => Boolean(selectedRecipe.value) &&
-    (!modelReady.value || loadedRecipeId.value !== selectedRecipe.value?.id));
 const selectedModeKey = computed<"img_gen" | "vid_gen">(() => generationMode.value === "video" ? "vid_gen" : "img_gen");
-const canGenerate = computed(() => modelReady.value && !previewingRecipe.value &&
-    (!supportedModes.value.length || supportedModes.value.includes(selectedModeKey.value)));
+const canGenerate = computed(() => useSelectedRecipe.value
+    ? modelSelectionComplete.value && recipeMode.value === generationMode.value
+    : defaultModelConfigured.value && supportedModes.value.includes(selectedModeKey.value));
 const currentJobModeKey = computed<"img_gen" | "vid_gen">(() => currentJob.value?.kind || selectedModeKey.value);
 const selectedModeFeatures = computed(() => {
     return capabilities.value?.features_by_mode?.[selectedModeKey.value] || {};
@@ -158,11 +156,17 @@ const samplers = computed(() => capabilities.value?.samplers || ["default"]);
 const schedulers = computed(() => capabilities.value?.schedulers || ["default"]);
 const availableLoras = computed(() => capabilities.value?.loras || []);
 const generationFeatures = computed<GenerationFeatures>(() => {
-    const loadedSelection = !previewingRecipe.value && loadedRecipeId.value === selectedRecipe.value?.id;
-    const declared = loadedSelection ? capabilities.value?.generation_features : selectedRecipe.value?.effective_features;
-    const features = { ...(declared || capabilities.value?.generation_features || {}) };
-    if (selectedRecipe.value && selectedRecipe.value.source !== "command_line") {
-        for (const [feature, slots] of Object.entries({ high_noise: ["high_noise_diffusion_model"], preview_tae: ["tae", "taesd"] })) {
+    const declared = useSelectedRecipe.value ? selectedRecipe.value?.effective_features : capabilities.value?.generation_features;
+    const features = { ...declared };
+    if (useSelectedRecipe.value) {
+        for (const [feature, slots] of Object.entries({
+            controlnet: ["control_net"],
+            ip_adapter: ["ip_adapter"],
+            high_noise: ["high_noise_diffusion_model"],
+            preview_tae: ["tae", "taesd"],
+            ref_audios: ["audio_vae", "audio_encoder"],
+            ref_video_audios: ["audio_vae"],
+        })) {
             features[feature] = Boolean(features[feature] && slots.some((slot) => modelSelection.value[slot]));
         }
         if (modelSelection.value.pulid_weights) features.slg = false;
@@ -189,8 +193,8 @@ const recommendedDimensions = computed(() => {
     };
 });
 const queueLimit = computed(() => capabilities.value?.limits?.max_queue_size ?? "unknown");
-const canCancelQueued = computed(() => Boolean(currentJobFeatures.value.cancel_queued));
-const canCancelGenerating = computed(() => Boolean(currentJobFeatures.value.cancel_generating));
+const canCancelQueued = computed(() => Boolean(currentJobFeatures.value.cancel_queued ?? capabilities.value?.features?.cancel_queued));
+const canCancelGenerating = computed(() => Boolean(currentJobFeatures.value.cancel_generating ?? capabilities.value?.features?.cancel_generating));
 const supportsPreview = computed(() => hasFeature("preview"));
 const previewModes = computed(() => capabilities.value?.preview_modes || ["none", "proj", "tae", "vae"]);
 const previewMode = computed(() => supportsPreview.value && previewModes.value.includes(preferredPreviewMode.value) &&
@@ -380,18 +384,19 @@ function updateCatalogRecipe(recipe: Recipe | null): void {
         selectedRecipe.value = recipe;
         syncGenerationMode(recipeMode.value);
     }
-    else if (recipe && (recipe.source === "command_line" || (!modelReady.value && modelStatus.value?.state !== "loading"))) selectRecipe(recipe);
-    else if (recipe && recipe.id === loadedRecipeId.value) {
-        selectedRecipe.value = recipe;
-        syncGenerationMode(recipeMode.value);
-    }
+    else if (recipe) selectRecipe(recipe);
 }
 
-function selectRecipe(recipe: Recipe): void {
+function updateModelSelection(selection: Record<string, string>, complete: boolean): void {
+    modelSelection.value = selection;
+    modelSelectionComplete.value = complete;
+}
+
+function selectRecipe(recipe: Recipe, refreshCurrent = true): void {
     selectedRecipe.value = recipe;
     syncGenerationMode(recipeMode.value);
     if (applyRecipeDefaultsOnSelect.value) {
-        if (recipe.source === "command_line" && capabilities.value?.runtime?.origin === "command_line") {
+        if (!useSelectedRecipe.value && capabilities.value?.runtime?.runtime_recipe) {
             const defaults = formFromCapabilities(capabilities.value);
             for (const key of ["width", "height", "video_frames", "fps", "strength"] as const) form[key] = defaults[key];
             deepAssign(form.sample_params, defaults.sample_params);
@@ -402,17 +407,17 @@ function selectRecipe(recipe: Recipe): void {
     }
     if (applyRecipeDefaultsOnSelect.value) videoLength.resetDuration();
     ensureOutputFormatForMode(recipeMode.value);
+    if (!useSelectedRecipe.value && refreshCurrent) void refreshCapabilities(true);
 }
 
-async function refreshCapabilities(): Promise<void> {
+async function refreshCapabilities(preserveMessage = false): Promise<void> {
     loadingCapabilities.value = true;
     capabilitiesError.value = "";
     try {
         const response = await getCapabilities(baseUrl.value);
         const initializeForm = !capabilities.value;
-        const enteringCommandLine = response.runtime?.origin === "command_line" && capabilities.value?.runtime?.origin !== "command_line";
+        const modelChanged = response.runtime?.revision !== capabilities.value?.runtime?.revision;
         capabilities.value = response;
-        if (response.runtime) modelStatus.value = response.runtime;
         serviceOnline.value = true;
         syncGenerationMode(recipeMode.value);
         if (initializeForm) {
@@ -423,15 +428,15 @@ async function refreshCapabilities(): Promise<void> {
             if (selectedRecipe.value && applyRecipeDefaultsOnSelect.value) applyRecipeDefaults(form, selectedRecipe.value.defaults);
             videoLength.resetDuration();
         }
-        if (response.runtime?.runtime_recipe && (enteringCommandLine || !selectedRecipe.value)) {
-            selectRecipe(response.runtime.runtime_recipe);
+        if (response.runtime?.runtime_recipe && (!selectedRecipe.value || (modelChanged && !useSelectedRecipe.value))) {
+            selectRecipe(response.runtime.runtime_recipe, false);
         }
         ensureOutputFormatForMode();
-        clearMessage();
+        if (!preserveMessage) clearMessage();
     } catch (error) {
         capabilitiesError.value = error instanceof Error ? error.message : String(error);
         serviceOnline.value = false;
-        setMessage(capabilitiesError.value, "error");
+        if (!preserveMessage) setMessage(capabilitiesError.value, "error");
     } finally {
         loadingCapabilities.value = false;
     }
@@ -553,6 +558,7 @@ async function pollJob(id: string): Promise<void> {
             return;
         }
         stopElapsedTimer();
+        void refreshCapabilities(true);
         if (currentStatus.value === "completed") {
             setMessage(currentJob.value?.kind === "vid_gen" ? "Video generation completed." : "Image generation completed.", "success");
             notifyJobFinished("completed", currentJob.value?.kind || null);
@@ -582,6 +588,13 @@ async function pollJob(id: string): Promise<void> {
 
 async function generate(): Promise<void> {
     if (!canGenerate.value || isJobRunning.value || mediaProcessing.value || submitting.value) return;
+    const model = useSelectedRecipe.value && selectedRecipe.value
+        ? { recipe: selectedRecipe.value.id, models: { ...modelSelection.value } }
+        : undefined;
+    if (model && !capabilities.value?.generation_model_selection) {
+        setMessage("Recipe selection in generation requires a server that supports it.", "error");
+        return;
+    }
     const invalidSize = dimensionError({ width: form.width, height: form.height }, capabilities.value?.limits, dimensionMultiple.value);
     if (invalidSize) { setMessage(invalidSize, "error"); return; }
     if (generationMode.value === "video" && videoLength.error) { setMessage(videoLength.error, "error"); return; }
@@ -598,9 +611,10 @@ async function generate(): Promise<void> {
         clearMessage();
         selectedOutputIndex.value = 0;
         startElapsedTimer();
+        const body = model ? { ...request, model } : request;
         const job = generationMode.value === "video"
-            ? await submitVideoJob(baseUrl.value, request)
-            : await submitImageJob(baseUrl.value, request);
+            ? await submitVideoJob(baseUrl.value, body)
+            : await submitImageJob(baseUrl.value, body);
         const ratio = Number(request.width) / Number(request.height);
         submittedAspectRatio.value = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
         currentJob.value = job;
@@ -817,7 +831,7 @@ onBeforeUnmount(() => {
             </div>
         </header>
         <section v-if="settingsOpen" class="studio-settings panel" aria-label="Settings">
-            <div class="settings-heading"><h1>Settings</h1><button class="btn-secondary" type="button" @click="refreshCapabilities" :disabled="loadingCapabilities">{{ loadingCapabilities ? 'Refreshing…' : 'Refresh server info' }}</button></div>
+            <div class="settings-heading"><h1>Settings</h1><button class="btn-secondary" type="button" @click="refreshCapabilities()" :disabled="loadingCapabilities">{{ loadingCapabilities ? 'Refreshing…' : 'Refresh server info' }}</button></div>
             <div class="settings">
                 <div class="settings__grid">
                     <div class="field">
@@ -870,7 +884,7 @@ onBeforeUnmount(() => {
                             <input id="preview-interval" v-model.number="previewInterval" type="number" min="1" step="1" :disabled="preferredPreviewMode === 'none'" />
                         </div>
                     </div>
-                    <div v-if="(selectedRecipe || modelReady) && preferredPreviewMode !== previewMode" class="hint stack-top">
+                    <div v-if="(selectedRecipe || defaultModelConfigured) && preferredPreviewMode !== previewMode" class="hint stack-top">
                         The selected preview mode is unavailable for the current model configuration. Preview will be disabled; your preference is saved.
                     </div>
                 </fieldset>
@@ -927,14 +941,12 @@ onBeforeUnmount(() => {
                         <img :src="previewImageSrc" alt="Generated output" />
                     </button>
                     <div v-else class="hero-frame hero-frame--empty">
-                        <div v-if="!modelReady || previewingRecipe" class="hero-placeholder hero-placeholder--model">
+                        <div v-if="!canGenerate" class="hero-placeholder hero-placeholder--model">
                             <div aria-live="polite">
-                                <h2>{{ modelStatus?.state === 'loading' ? 'Loading your model' : 'Choose a model to get started' }}</h2>
-                                <p>{{ modelStatus?.state === 'loading'
-                                    ? 'Your model is loading. You can prepare your prompt while you wait.'
-                                    : 'Select a recipe and load its model, then bring your ideas to life.' }}</p>
+                                <h2>Choose a model to get started</h2>
+                                <p>Select a recipe and its required model files.</p>
                             </div>
-                            <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">{{ modelStatus?.state === 'loading' ? 'View loading status' : 'Choose & load model' }}</button>
+                            <button class="btn model-start-action" type="button" aria-haspopup="dialog" aria-controls="composer-panel" @click="composer?.openModels($event)">Choose model</button>
                         </div>
                         <div v-else class="hero-placeholder">
                             <h2>{{ generationMode === "video" ? "Imagine it in motion" : "Make room for imagination" }}</h2>
@@ -969,9 +981,9 @@ onBeforeUnmount(() => {
                     </GenerationProgress>
                 </div>
             </section>
-            <PromptComposer ref="composer" :form="form" :mode="generationMode" :model-label="selectedRecipe?.name || (modelReady ? modelName : 'Choose model')"
+            <PromptComposer ref="composer" :form="form" :mode="generationMode" :model-label="selectedRecipe?.name || (defaultModelConfigured ? modelName : 'Choose model')"
                 :enhancement="enhancement" @enhancement-settings="openEnhancementSettings"
-                :model-ready="canGenerate" :disabled="!canGenerate || mediaProcessing || submitting || (generationMode === 'video' && Boolean(videoLength.error))" :busy="isJobRunning"
+                :model-selected="canGenerate" :disabled="!canGenerate || mediaProcessing || submitting || (generationMode === 'video' && Boolean(videoLength.error))" :busy="isJobRunning"
                 :video-summary="videoLength.summary" :video-details="videoLength.details"
                 :can-cancel="canCancelCurrentJob" :cancelling="cancelling || Boolean(currentJob?.cancel_requested)"
                 :has-loras="showLoras" :lora-count="loras.filter(item => item.path).length"
@@ -984,7 +996,7 @@ onBeforeUnmount(() => {
                         @clear-media="kind => kind === 'video' ? videoInput.clear() : audioInput.clear()" @preview-media="sectionState.referenceMedia = true; composer?.openMore($event)" />
                 </template>
                 <template #models>
-        <ModelSelector embedded v-model:apply-defaults="applyRecipeDefaultsOnSelect" :base-url="baseUrl" :busy="isJobRunning" :lora-summary="loraSummary" @status="modelStatus = $event" @changed="refreshCapabilities" @recipe="selectRecipe" @selection="modelSelection = $event" @catalog-recipe="updateCatalogRecipe">
+        <ModelSelector embedded v-model:apply-defaults="applyRecipeDefaultsOnSelect" :base-url="baseUrl" :busy="isJobRunning || submitting" :current-recipe="capabilities?.runtime?.runtime_recipe" :lora-summary="loraSummary" @changed="refreshCapabilities()" @recipe="selectRecipe" @selection="updateModelSelection" @catalog-recipe="updateCatalogRecipe">
         </ModelSelector>
                 </template>
                 <template #lora>

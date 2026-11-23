@@ -140,6 +140,7 @@ export type GenerationFeatures = Record<string, boolean>;
 
 export interface Capabilities {
   generation_features?: GenerationFeatures;
+  generation_model_selection?: boolean;
   runtime?: ModelStatus;
   model?: {
     stem?: string;
@@ -229,14 +230,13 @@ export interface Job {
 export type CacheMode = (typeof CACHE_MODES)[number];
 
 export interface ModelStatus {
-  state: "empty" | "loading" | "ready" | "error";
+  state: "empty" | "configured";
   recipe: string | null;
   models: Record<string, string>;
   error: string | null;
-  revision?: number;
   origin?: string;
+  revision?: number;
   runtime_recipe?: Recipe;
-  load_elapsed_seconds?: number | null;
 }
 export interface RecipeDefaults {
   strength?: number;
@@ -276,7 +276,7 @@ export interface Recipe {
   size_multiple?: number;
   video_constraints?: VideoConstraints;
   required_any?: string[][];
-  source: "builtin" | "user" | "command_line";
+  source: "builtin" | "user" | "command_line" | "current";
   models?: Record<string, string>;
   defaults?: RecipeDefaults;
   features?: string[];

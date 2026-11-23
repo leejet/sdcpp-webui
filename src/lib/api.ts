@@ -67,15 +67,6 @@ export function getModelStatus(baseUrl: string): Promise<ModelStatus> {
 export function refreshModels(baseUrl: string): Promise<{ errors: CatalogError[] }> {
     return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/refresh"), { method: "POST" });
 }
-export function loadModel(baseUrl: string, recipe: string, models: Record<string, string>): Promise<ModelStatus> {
-    return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/load"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipe, models }),
-    });
-}
-export function unloadModel(baseUrl: string): Promise<ModelStatus> {
-    return fetchJson(withBase(baseUrl, "/sdcpp/v1/models/unload"), { method: "POST" });
-}
 
 const dglPath = "/sdcpp/v1/dgl";
 
