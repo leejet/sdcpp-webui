@@ -1,18 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { getDglJob, listDglScripts, loadDglScript, saveDglScript, dglPreviewUrl, submitDglJob } from "../lib/api";
+import { createStoredRef } from "../lib/settings";
 import type { DglJob } from "../lib/types";
 
 const starter = '# version: 0.0.0\n\nfn main() {\n    return "Hello, DGL"\n}\n';
 const directory = ref("");
 const files = ref<string[]>([]);
+const fileSearch = ref("");
 const name = ref("untitled.dgl");
 const source = ref(starter);
+const lastOpened = createStoredRef("sdcpp-webui-dgl-last-script", "", (value: unknown) => typeof value === "string" ? value : "");
 const openedName = ref("");
-const cleanName = ref(name.value);
 const cleanSource = ref(source.value);
 const busy = ref(false);
 const fileError = ref("");
+const saveNameDialog = ref<HTMLDialogElement>();
+const saveNameInput = ref<HTMLInputElement>();
+const saveName = ref("");
+const namingFile = ref(false);
 const running = ref(false);
 const runError = ref("");
 const job = ref<DglJob | null>(null);
@@ -23,7 +29,9 @@ const frameNumbers = ref<Record<number, number>>({});
 const inspectFrames = ref<Record<number, boolean>>({});
 let runAbort: AbortController | undefined;
 
-const modified = computed(() => name.value !== cleanName.value || source.value !== cleanSource.value);
+const searchTerm = computed(() => fileSearch.value.trim().toLowerCase());
+const visibleFiles = computed(() => files.value.filter((file) => file.toLowerCase().includes(searchTerm.value)));
+const modified = computed(() => source.value !== cleanSource.value);
 const lineCount = computed(() => source.value.split("\n").length);
 const tokens = computed(() => {
     const parts: { text: string; kind?: string }[] = [];
@@ -59,13 +67,13 @@ async function fileAction(action: () => Promise<void>): Promise<void> {
     }
 }
 
-function setDocument(file: string, text: string, saved: boolean): void {
+function setDocument(file: string, text: string, saved: boolean, replaceEditor = true): void {
     name.value = file;
-    cleanName.value = file;
     source.value = text;
     cleanSource.value = text;
     openedName.value = saved ? file : "";
-    if (editor.value) {
+    if (saved) lastOpened.value = file;
+    if (replaceEditor && editor.value) {
         editor.value.scrollTop = 0;
         editor.value.scrollLeft = 0;
         syncScroll();
@@ -80,11 +88,20 @@ function nextName(stem: string): string {
     return next;
 }
 
-function refreshFiles(): Promise<void> {
+function refreshFiles(restoreLast = false): Promise<void> {
     return fileAction(async () => {
         const response = await listDglScripts();
         directory.value = response.directory;
         files.value = response.scripts;
+        if (restoreLast && lastOpened.value && !openedName.value && !modified.value) {
+            const name = lastOpened.value;
+            if (files.value.includes(name)) {
+                const script = await loadDglScript(name);
+                setDocument(name, script.source, true);
+                return;
+            }
+            lastOpened.value = "";
+        }
         if (!openedName.value && !modified.value && name.value === "untitled.dgl") {
             setDocument(nextName("untitled"), source.value, false);
         }
@@ -99,7 +116,7 @@ function newScript(): void {
     if (!mayReplaceDocument()) return;
     fileError.value = "";
     setDocument(nextName("untitled"), starter, false);
-    editor.value?.focus();
+    void nextTick(() => editor.value?.focus());
 }
 
 function openScript(file: string): Promise<void> | undefined {
@@ -110,17 +127,31 @@ function openScript(file: string): Promise<void> | undefined {
     });
 }
 
-function saveScript(duplicate = false): Promise<void> {
+function showSaveAs(): void {
+    if (busy.value || !saveNameDialog.value) return;
+    fileError.value = "";
+    saveName.value = openedName.value ? nextName(openedName.value.slice(0, -".dgl".length) + "-copy") : name.value;
+    saveNameDialog.value.showModal();
+    namingFile.value = true;
+    void nextTick(() => saveNameInput.value?.select());
+}
+
+function saveScript(requested: string): Promise<void> | undefined {
+    const filename = requested.trim();
+    if (!filename) return;
+    const target = filename.endsWith(".dgl") ? filename : filename + ".dgl";
     return fileAction(async () => {
-        const requested = name.value.trim();
-        const target = duplicate
-            ? nextName(openedName.value.slice(0, -".dgl".length) + "-copy")
-            : requested.endsWith(".dgl") ? requested : requested + ".dgl";
         const text = source.value;
         const saved = await saveDglScript(target, text, target === openedName.value ? cleanSource.value : undefined);
         if (!files.value.includes(saved.name)) files.value = [...files.value, saved.name].sort();
-        setDocument(saved.name, text, true);
+        setDocument(saved.name, text, true, false);
+        saveNameDialog.value?.close();
     });
+}
+
+function saveCurrentScript(): void {
+    if (openedName.value) void saveScript(openedName.value);
+    else showSaveAs();
 }
 
 function syncScroll(): void {
@@ -131,13 +162,15 @@ function syncScroll(): void {
 }
 
 function editKeydown(event: KeyboardEvent): void {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.key === "Enter") {
         event.preventDefault();
         void runScript();
     }
-    if (event.key === "s" && (event.ctrlKey || event.metaKey)) {
+    if (event.key.toLowerCase() === "s") {
         event.preventDefault();
-        if (name.value.trim()) void saveScript();
+        if (event.shiftKey) showSaveAs();
+        else saveCurrentScript();
     }
 }
 
@@ -165,7 +198,7 @@ async function runScript(): Promise<void> {
     }
 }
 
-onMounted(refreshFiles);
+onMounted(() => { void refreshFiles(true); });
 onBeforeUnmount(() => runAbort?.abort());
 </script>
 
@@ -178,28 +211,32 @@ onBeforeUnmount(() => runAbort?.abort());
             </div>
             <div class="dgl-directory">
                 <code :title="directory">{{ directory }}</code>
-                <button class="btn-ghost" type="button" :disabled="busy" @click="refreshFiles">Refresh</button>
+                <button class="btn-ghost" type="button" :disabled="busy" @click="refreshFiles()">Refresh</button>
             </div>
-            <ul v-if="files.length">
-                <li v-for="file in files" :key="file">
+            <div v-if="files.length" class="field dgl-file-search">
+                <input v-model="fileSearch" type="search" placeholder="Search scripts" aria-label="Search scripts" />
+            </div>
+            <ul v-if="visibleFiles.length">
+                <li v-for="file in visibleFiles" :key="file">
                     <button class="dgl-file" type="button" :aria-current="openedName === file ? 'true' : undefined" :disabled="busy" @click="openScript(file)">{{ file }}</button>
                 </li>
             </ul>
-            <p v-else-if="!busy && !fileError">No saved scripts.</p>
+            <p v-else-if="!busy && !fileError">{{ files.length ? 'No matching scripts.' : 'No saved scripts.' }}</p>
         </aside>
 
         <section class="panel dgl-editor" aria-label="Script editor" @keydown="editKeydown">
             <div class="dgl-toolbar">
-                <label for="dgl-file-name">File name</label>
-                <input id="dgl-file-name" v-model="name" :disabled="busy" autocomplete="off" />
-                <span v-if="modified || !openedName" class="dgl-unsaved">Unsaved</span>
+                <div class="dgl-document">
+                    <h2 :title="name">{{ name }}</h2>
+                    <span v-if="modified || !openedName" class="dgl-dirty" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
+                </div>
                 <div class="dgl-toolbar__actions">
-                    <button class="btn-secondary" type="button" :disabled="busy || !openedName" @click="saveScript(true)">Duplicate</button>
-                    <button class="btn-secondary" type="button" :disabled="busy || !name.trim()" @click="saveScript()">Save</button>
+                    <button v-if="openedName" class="btn-ghost" type="button" :disabled="busy" aria-haspopup="dialog" @click="showSaveAs">Save as…</button>
+                    <button class="btn-secondary" type="button" :disabled="busy" @click="saveCurrentScript">Save</button>
                     <button class="btn" type="button" :disabled="running || !source.trim()" @click="runScript">{{ running ? 'Running…' : 'Run' }}</button>
                 </div>
             </div>
-            <p v-if="fileError" class="status-message status-message--error" role="alert">{{ fileError }}</p>
+            <p v-if="fileError && !namingFile" class="status-message status-message--error" role="alert">{{ fileError }}</p>
             <div class="dgl-code">
                 <div ref="gutter" class="dgl-gutter" aria-hidden="true"><div v-for="line in lineCount" :key="line">{{ line }}</div></div>
                 <div class="dgl-code-buffer">
@@ -242,6 +279,25 @@ onBeforeUnmount(() => runAbort?.abort());
             </template>
             <p v-else>Run a script to see its output.</p>
         </section>
+
+        <dialog ref="saveNameDialog" class="generation-details dgl-save-dialog" aria-labelledby="dgl-save-title"
+            @cancel="busy && $event.preventDefault()" @close="namingFile = false; fileError = ''">
+            <div class="generation-details__header">
+                <h2 id="dgl-save-title">Save script as</h2>
+            </div>
+            <form class="generation-details__body dgl-save-form" @submit.prevent="saveScript(saveName)">
+                <div class="field">
+                    <label for="dgl-save-name">File name</label>
+                    <input id="dgl-save-name" ref="saveNameInput" v-model="saveName" :disabled="busy" autocomplete="off" required autofocus />
+                </div>
+                <p v-if="fileError" class="status-message status-message--error" role="alert">{{ fileError }}</p>
+                <div class="dgl-save-actions">
+                    <button class="btn-ghost" type="button" :disabled="busy" @click="saveNameDialog?.close()">Cancel</button>
+                    <button class="btn" type="submit" :disabled="busy || !saveName.trim()">Save</button>
+                </div>
+            </form>
+        </dialog>
+
     </main>
 </template>
 
@@ -263,6 +319,8 @@ onBeforeUnmount(() => runAbort?.abort());
 .dgl-heading h1, .dgl-heading h2 { margin: 0; font-size: 15px; }
 .dgl-directory { margin: 6px 0; font-size: 12px; color: var(--muted); }
 .dgl-directory code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgl-file-search { margin: 8px 0; }
+.dgl-file-search input { min-width: 0; padding: 6px 8px; font-size: 12px; }
 .dgl-files ul { padding: 0; margin: 0; list-style: none; max-height: 67dvh; overflow: auto; }
 .dgl-file {
     background: transparent;
@@ -278,8 +336,10 @@ onBeforeUnmount(() => runAbort?.abort());
 .dgl-file:hover, .dgl-file[aria-current] { background: var(--select-option-selected-bg); }
 .dgl-toolbar { flex-wrap: wrap; }
 .dgl-toolbar label, .dgl-unsaved { font-size: 12px; color: var(--muted); }
-.dgl-toolbar > input { flex: 1; min-width: 120px; }
-.dgl-toolbar__actions { margin-left: auto; }
+.dgl-document { display: flex; align-items: center; gap: 8px; flex: 1 1 150px; min-width: 0; }
+.dgl-document h2 { margin: 0; overflow: hidden; font: 600 14px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.dgl-dirty { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+.dgl-toolbar__actions { margin-left: auto; flex-wrap: wrap; }
 .dgl-workspace p { font-size: 13px; }
 .dgl-code {
     --code-comment: #64748b;
@@ -333,6 +393,8 @@ onBeforeUnmount(() => runAbort?.abort());
 .dgl-code-buffer .string { color: var(--code-string); }
 .dgl-code-buffer .number { color: var(--code-number); }
 .dgl-code-buffer .call { color: var(--code-call); }
+.dgl-save-form { display: grid; gap: 14px; }
+.dgl-save-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dgl-result { padding: 12px 0; border-top: 1px solid var(--border); }
 .dgl-result:first-of-type { margin-top: 12px; }
 .dgl-result h3 { font: 600 13px var(--font-mono); margin: 0 0 6px; overflow-wrap: anywhere; }
