@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@codemirror/commands':
+        specifier: ^6.11.1
+        version: 6.11.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.15
+        version: 6.43.15
       vue:
         specifier: ^3.2.38
         version: 3.5.32(typescript@5.9.3)
@@ -47,6 +56,21 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
+  '@codemirror/commands@6.11.1':
+    resolution: {integrity: sha512-O/4hG3SC1YwcmQ0d2UVNDs+AsaNWd1iHVxbTeEBuqH+6bExAiPK3iS/BvpY6rZGURALv4ZD3sIgcCmRvw3ehBg==}
+
+  '@codemirror/language@6.13.1':
+    resolution: {integrity: sha512-zfvU2r3TyylQLMj/te+5CnQ0rSqZi8B1oTCBbQkagcLW4Xc6imab6qN+pEJhsuNOLaJqiRyBXp9UhWA1DhVvDw==}
+
+  '@codemirror/state@6.7.6':
+    resolution: {integrity: sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==}
+
+  '@codemirror/streamparser@6.0.0':
+    resolution: {integrity: sha512-JTFPF6xrfjt0mnfGPgzcLiMwYmvIyNaoizp8BYzv8FE8KrT6GBGDZ190rtt+O7Wke3gG/MFHyiY9YGNeimof4w==}
+
+  '@codemirror/view@6.43.15':
+    resolution: {integrity: sha512-HHsfpqFeHyXLs983pSRe38Xajs0vFWZQ2BuX0m7Ki8w3jZ5iD8cuR3lBz2/5/X53Dhf32SBHKh6rtSTB6tKeGw==}
+
   '@esbuild/android-arm@0.15.18':
     resolution: {integrity: sha512-5GT+kcs2WVGjVs7+boataCkO5Fg0y4kCjzkB5bAip7H4jfnOS3dA6KPiww9W1OEKTKeAcUVhdZGvgI65OXmUnw==}
     engines: {node: '>=12'}
@@ -61,6 +85,18 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@lezer/common@1.5.6':
+    resolution: {integrity: sha512-NZxu3q49ck+YYbEJPuIPIyFP37XneBvzPIarBHEXBLBVfkZqQieZ/Y2boYnGNYtmjpOZLnAKs/lwqtmDpi365w==}
+
+  '@lezer/highlight@1.2.5':
+    resolution: {integrity: sha512-O1GMVKgtf5YspFaRzpmqkVgMtIk2HG9uMAbH6wdAIdNh3TVzCsch/+cRi+6l2//UGDKe6NB9BW3cvuR5ezMQ0w==}
+
+  '@lezer/lr@1.4.12':
+    resolution: {integrity: sha512-On9HU4oMMiHPMkQDgoTnGahjgG5n/MkN38CgG77sMraKLL+3JBbeQNi1FcCXV9QRqwF9/BUXP3caHyJC1fBOTQ==}
+
+  '@marijn/find-cluster-break@1.0.4':
+    resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
   '@vitejs/plugin-vue@3.2.0':
     resolution: {integrity: sha512-E0tnaL4fr+qkdCNxJ+Xd0yM31UwMkQje76fsDVBBUCoGOUPexu2VDUYHL8P4CwV+zMvWw6nlRw19OnRKmYAJpw==}
@@ -130,6 +166,9 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  crelt@1.0.7:
+    resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
@@ -347,6 +386,9 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  style-mod@4.1.5:
+    resolution: {integrity: sha512-WQ2llCZa9sZSkJA+aOwpg5DkfbAXFKGh//t3MRTBeruFiSBC+GXUmbBzrw3bXyboCWAbtCW9InDfBsXrRD/rAg==}
+
   supports-preserve-symlinks-flag@1.0.0:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
@@ -409,6 +451,9 @@ packages:
       typescript:
         optional: true
 
+  w3c-keyname@2.2.8:
+    resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
+
 snapshots:
 
   '@babel/helper-string-parser@7.27.1': {}
@@ -424,6 +469,36 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
+  '@codemirror/commands@6.11.1':
+    dependencies:
+      '@codemirror/language': 6.13.1
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.15
+      '@lezer/common': 1.5.6
+
+  '@codemirror/language@6.13.1':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      '@codemirror/streamparser': 6.0.0
+      '@codemirror/view': 6.43.15
+      '@lezer/common': 1.5.6
+      '@lezer/highlight': 1.2.5
+      '@lezer/lr': 1.4.12
+      style-mod: 4.1.5
+
+  '@codemirror/state@6.7.6':
+    dependencies:
+      '@marijn/find-cluster-break': 1.0.4
+
+  '@codemirror/streamparser@6.0.0': {}
+
+  '@codemirror/view@6.43.15':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      crelt: 1.0.7
+      style-mod: 4.1.5
+      w3c-keyname: 2.2.8
+
   '@esbuild/android-arm@0.15.18':
     optional: true
 
@@ -431,6 +506,18 @@ snapshots:
     optional: true
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@lezer/common@1.5.6': {}
+
+  '@lezer/highlight@1.2.5':
+    dependencies:
+      '@lezer/common': 1.5.6
+
+  '@lezer/lr@1.4.12':
+    dependencies:
+      '@lezer/common': 1.5.6
+
+  '@marijn/find-cluster-break@1.0.4': {}
 
   '@vitejs/plugin-vue@3.2.0(vite@3.2.11)(vue@3.5.32(typescript@5.9.3))':
     dependencies:
@@ -532,6 +619,8 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
+
+  crelt@1.0.7: {}
 
   csstype@3.2.3: {}
 
@@ -690,6 +779,8 @@ snapshots:
 
   source-map-js@1.2.1: {}
 
+  style-mod@4.1.5: {}
+
   supports-preserve-symlinks-flag@1.0.0: {}
 
   to-regex-range@5.0.1:
@@ -730,3 +821,5 @@ snapshots:
       '@vue/shared': 3.5.32
     optionalDependencies:
       typescript: 5.9.3
+
+  w3c-keyname@2.2.8: {}

@@ -25,6 +25,12 @@ export function getCapabilities(baseUrl: string): Promise<Capabilities> {
     return fetchJson<Capabilities>(withBase(baseUrl, "/sdcpp/v1/capabilities"));
 }
 
+export function mediaViewUrl(root: string, path: string, revision = 0): string {
+    const params = new URLSearchParams({ root, path });
+    if (revision) params.set("v", String(revision));
+    return withBase("", "/sdcpp/v1/view?" + params);
+}
+
 export function submitImageJob(baseUrl: string, body: unknown): Promise<Job> {
     return fetchJson<Job>(withBase(baseUrl, "/sdcpp/v1/img_gen"), {
         method: "POST",

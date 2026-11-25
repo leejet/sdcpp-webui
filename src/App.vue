@@ -927,7 +927,7 @@ onBeforeUnmount(() => {
                 <div v-if="capabilitiesError" class="status-message status-message--error">{{ capabilitiesError }}</div>
             </div>
         </section>
-        <DglWorkspace v-if="dglVisited" v-show="dglOpen && !settingsOpen" :active="dglOpen && !settingsOpen" :poll-interval-ms="pollIntervalMs" />
+        <DglWorkspace v-if="dglVisited" v-show="dglOpen && !settingsOpen" :active="dglOpen && !settingsOpen" :poll-interval-ms="pollIntervalMs" @expand-image="openLightbox" />
         <main v-show="!settingsOpen && !dglOpen" class="studio-workspace">
             <section class="output-stage" aria-label="Generated output" @dragover="onReferenceDragover" @drop="onReferenceDrop">
                 <div class="output-canvas" :style="{ '--output-ratio': outputAspectRatio }">

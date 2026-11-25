@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { getJob, listDglScripts, loadDglScript, saveDglScript, submitDglJob } from "../lib/api";
+import { getCapabilities, getJob, listDglScripts, loadDglScript, saveDglScript, submitDglJob } from "../lib/api";
 import { createStoredRef } from "../lib/settings";
 import type { DglJob } from "../lib/types";
+import DglEditor from "./DglEditor.vue";
 import GenerationProgress from "./GenerationProgress.vue";
 
 const props = defineProps<{ active: boolean; pollIntervalMs: number }>();
+const emit = defineEmits<{ (event: "expand-image", src: string, alt: string): void }>();
 
 const starter = '# version: 0.0.0\n\nfn main() {\n    return "Hello, DGL"\n}\n';
 const directory = ref("");
@@ -27,29 +29,17 @@ const runError = ref("");
 const job = ref<DglJob | null>(null);
 const resultDialog = ref<HTMLDialogElement>();
 const resultDialogOpen = ref(false);
-const editor = ref<HTMLTextAreaElement>();
-const highlight = ref<HTMLPreElement>();
-const gutter = ref<HTMLElement>();
+const editor = ref<InstanceType<typeof DglEditor>>();
+const documentRevision = ref(0);
 let runAbort: AbortController | undefined;
 
+const mediaAllowed = ref(false);
+const mediaEnabled = createStoredRef("sdcpp-webui-dgl-media-view", true, (value: unknown) => value !== false);
+const canViewMedia = computed(() => props.active && mediaAllowed.value && mediaEnabled.value);
+const outputRevision = ref(0);
 const searchTerm = computed(() => fileSearch.value.trim().toLowerCase());
 const visibleFiles = computed(() => files.value.filter((file) => file.toLowerCase().includes(searchTerm.value)));
 const modified = computed(() => source.value !== cleanSource.value);
-const lineCount = computed(() => source.value.split("\n").length);
-const tokens = computed(() => {
-    const parts: { text: string; kind?: string }[] = [];
-    const pattern = /(?<comment>#[^\r\n]*|\/\/[^\r\n]*)|(?<string>"(?:\\[^\r\n]|[^"\\\r\n])*"?)|(?<keyword>\b(?:fn|return|true|false)\b)|(?<number>-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(?<call>\b[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*(?=\s*\())|\b[a-zA-Z_]\w*/g;
-    let offset = 0;
-    for (const match of source.value.matchAll(pattern)) {
-        const start = match.index ?? 0;
-        if (start > offset) parts.push({ text: source.value.slice(offset, start) });
-        const kind = Object.keys(match.groups ?? {}).find((group) => match.groups?.[group] !== undefined);
-        parts.push({ text: match[0], kind });
-        offset = start + match[0].length;
-    }
-    parts.push({ text: source.value.slice(offset) + "\n" });
-    return parts;
-});
 const runResult = computed(() => {
     const result = job.value?.status === "completed" ? job.value.result : null;
     return result && (result.outputs.length || result.media.length) ? result : null;
@@ -80,11 +70,7 @@ function setDocument(file: string, text: string, saved: boolean, replaceEditor =
     cleanSource.value = text;
     openedName.value = saved ? file : "";
     if (saved) lastOpened.value = file;
-    if (replaceEditor && editor.value) {
-        editor.value.scrollTop = 0;
-        editor.value.scrollLeft = 0;
-        syncScroll();
-    }
+    if (replaceEditor) documentRevision.value += 1;
 }
 
 function nextName(stem: string): string {
@@ -161,13 +147,6 @@ function saveCurrentScript(): void {
     else showSaveAs();
 }
 
-function syncScroll(): void {
-    if (!editor.value || !highlight.value || !gutter.value) return;
-    highlight.value.scrollTop = editor.value.scrollTop;
-    highlight.value.scrollLeft = editor.value.scrollLeft;
-    gutter.value.scrollTop = editor.value.scrollTop;
-}
-
 function editKeydown(event: KeyboardEvent): void {
     if (!(event.ctrlKey || event.metaKey)) return;
     if (event.key === "Enter") {
@@ -203,6 +182,7 @@ async function runScript(): Promise<void> {
             await new Promise((resolve) => window.setTimeout(resolve, props.pollIntervalMs));
             if (!abort.signal.aborted) status = await getJob<DglJob>("", status.id, abort.signal);
         }
+        if (!abort.signal.aborted && status.status === "completed") outputRevision.value += 1;
     } catch (error) {
         if (!abort.signal.aborted) runError.value = describeError(error);
     } finally {
@@ -210,7 +190,10 @@ async function runScript(): Promise<void> {
     }
 }
 
-onMounted(() => { void refreshFiles(true); });
+onMounted(() => {
+    void refreshFiles(true);
+    void getCapabilities("").then((response) => { mediaAllowed.value = response.media_view === true; }, () => {});
+});
 onBeforeUnmount(() => runAbort?.abort());
 </script>
 
@@ -243,6 +226,7 @@ onBeforeUnmount(() => runAbort?.abort());
                     <span v-if="modified || !openedName" class="dgl-dirty" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
                 </div>
                 <div class="dgl-toolbar__actions">
+                    <label v-if="mediaAllowed" class="dgl-media-toggle"><input v-model="mediaEnabled" type="checkbox" /> Media view</label>
                     <button v-if="openedName" class="btn-ghost" type="button" :disabled="busy" aria-haspopup="dialog" @click="showSaveAs">Save as…</button>
                     <button class="btn-secondary" type="button" :disabled="busy" @click="saveCurrentScript">Save</button>
                     <button class="btn" type="button" :disabled="running || !source.trim()" @click="runScript">{{ running ? 'Running…' : 'Run' }}</button>
@@ -250,13 +234,9 @@ onBeforeUnmount(() => runAbort?.abort());
             </div>
             <p v-if="fileError && !namingFile" class="status-message status-message--error" role="alert">{{ fileError }}</p>
             <p v-if="runError || job?.error" class="status-message status-message--error" role="alert">{{ runError || job?.error?.message }}</p>
-            <div class="dgl-code">
-                <div ref="gutter" class="dgl-gutter" aria-hidden="true"><div v-for="line in lineCount" :key="line">{{ line }}</div></div>
-                <div class="dgl-code-buffer">
-                    <pre ref="highlight" aria-hidden="true"><span v-for="(token, index) in tokens" :key="index" :class="token.kind">{{ token.text }}</span></pre>
-                    <textarea ref="editor" v-model="source" aria-label="DGL source" :readonly="busy" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" @scroll="syncScroll" />
-                </div>
-            </div>
+            <DglEditor ref="editor" v-model="source" :document-revision="documentRevision" :read-only="busy"
+                :media-view="canViewMedia" :output-revision="outputRevision" @save="saveCurrentScript" @save-as="showSaveAs" @run="runScript"
+                @expand-image="(src, alt) => emit('expand-image', src, alt)" />
             <GenerationProgress v-if="active && job" class="dgl-progress" :job="job" show-finished-progress>
                 <template #actions>
                     <div v-if="runResult" class="stage-actions">
@@ -350,59 +330,8 @@ onBeforeUnmount(() => runAbort?.abort());
 .dgl-document h2 { margin: 0; overflow: hidden; font: 600 14px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .dgl-dirty { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
 .dgl-toolbar__actions { margin-left: auto; flex-wrap: wrap; }
+.dgl-media-toggle { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .dgl-workspace p { font-size: 13px; }
-.dgl-code {
-    --code-comment: #64748b;
-    --code-keyword: #7439a6;
-    --code-string: #086c61;
-    --code-number: #a13e24;
-    --code-call: #2151a3;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    margin-top: 12px;
-    height: clamp(380px, 67dvh, 1000px);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--input-bg);
-    overflow: hidden;
-}
-:global([data-theme="dark"]) .dgl-code {
-    --code-comment: #9ca3af;
-    --code-keyword: #c4a5f6;
-    --code-string: #89d6b7;
-    --code-number: #f2aa84;
-    --code-call: #9bbdff;
-}
-.dgl-code:focus-within { border-color: var(--focus-border); }
-.dgl-gutter, .dgl-code-buffer > :is(pre, textarea) {
-    padding: 12px;
-    font: 13px/21px var(--font-mono);
-    font-variant-ligatures: none;
-    tab-size: 4;
-    letter-spacing: normal;
-    margin: 0;
-}
-.dgl-gutter { overflow: hidden; padding-bottom: 32px; text-align: right; color: var(--muted); background: var(--panel-subtle); }
-.dgl-code-buffer { position: relative; min-width: 0; }
-.dgl-code-buffer > :is(pre, textarea) {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    white-space: pre;
-    overflow: scroll;
-}
-.dgl-code-buffer pre { pointer-events: none; scrollbar-color: transparent transparent; }
-.dgl-code-buffer textarea { resize: none; color: transparent; caret-color: var(--text); outline: none; box-shadow: none; }
-.dgl-code-buffer textarea::selection { color: transparent; background: #6388dd40; }
-.dgl-code-buffer .comment { color: var(--code-comment); }
-.dgl-code-buffer .keyword { color: var(--code-keyword); }
-.dgl-code-buffer .string { color: var(--code-string); }
-.dgl-code-buffer .number { color: var(--code-number); }
-.dgl-code-buffer .call { color: var(--code-call); }
 .dgl-progress { margin-top: 8px; }
 .dgl-save-form { display: grid; gap: 14px; }
 .dgl-save-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -418,9 +347,5 @@ onBeforeUnmount(() => runAbort?.abort());
 @media (max-width: 620px) {
     .dgl-workspace { grid-template-columns: minmax(0, 1fr); }
     .dgl-files ul { max-height: 148px; }
-}
-@media (forced-colors: active) {
-    .dgl-code-buffer pre { visibility: hidden; }
-    .dgl-code-buffer textarea { color: CanvasText; }
 }
 </style>

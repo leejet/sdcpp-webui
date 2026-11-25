@@ -141,6 +141,7 @@ export type GenerationFeatures = Record<string, boolean>;
 export interface Capabilities {
   generation_features?: GenerationFeatures;
   generation_model_selection?: boolean;
+  media_view?: boolean;
   runtime?: ModelStatus;
   model?: {
     stem?: string;
