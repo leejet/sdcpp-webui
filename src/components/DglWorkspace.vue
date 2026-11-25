@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { getDglJob, listDglScripts, loadDglScript, saveDglScript, dglPreviewUrl, submitDglJob } from "../lib/api";
+import { getJob, listDglScripts, loadDglScript, saveDglScript, submitDglJob } from "../lib/api";
 import { createStoredRef } from "../lib/settings";
 import type { DglJob } from "../lib/types";
+import GenerationProgress from "./GenerationProgress.vue";
+
+const props = defineProps<{ active: boolean; pollIntervalMs: number }>();
 
 const starter = '# version: 0.0.0\n\nfn main() {\n    return "Hello, DGL"\n}\n';
 const directory = ref("");
@@ -22,11 +25,11 @@ const namingFile = ref(false);
 const running = ref(false);
 const runError = ref("");
 const job = ref<DglJob | null>(null);
+const resultDialog = ref<HTMLDialogElement>();
+const resultDialogOpen = ref(false);
 const editor = ref<HTMLTextAreaElement>();
 const highlight = ref<HTMLPreElement>();
 const gutter = ref<HTMLElement>();
-const frameNumbers = ref<Record<number, number>>({});
-const inspectFrames = ref<Record<number, boolean>>({});
 let runAbort: AbortController | undefined;
 
 const searchTerm = computed(() => fileSearch.value.trim().toLowerCase());
@@ -46,6 +49,10 @@ const tokens = computed(() => {
     }
     parts.push({ text: source.value.slice(offset) + "\n" });
     return parts;
+});
+const runResult = computed(() => {
+    const result = job.value?.status === "completed" ? job.value.result : null;
+    return result && (result.outputs.length || result.media.length) ? result : null;
 });
 
 const dtypeNames: Record<number, string> = { 1: "u8", 2: "i32", 3: "i64", 4: "f32", 5: "f64" };
@@ -174,22 +181,27 @@ function editKeydown(event: KeyboardEvent): void {
     }
 }
 
+function showRunResult(): void {
+    if (!resultDialog.value) return;
+    resultDialog.value.showModal();
+    resultDialogOpen.value = true;
+}
+
 async function runScript(): Promise<void> {
     if (running.value || !source.value.trim()) return;
+    resultDialog.value?.close();
     const abort = new AbortController();
     runAbort = abort;
     running.value = true;
     job.value = null;
     runError.value = "";
-    frameNumbers.value = {};
-    inspectFrames.value = {};
     try {
         let status = await submitDglJob(source.value, abort.signal);
         while (!abort.signal.aborted) {
             job.value = status;
             if (status.status !== "queued" && status.status !== "generating") break;
-            await new Promise((resolve) => window.setTimeout(resolve, 400));
-            if (!abort.signal.aborted) status = await getDglJob(status.id, abort.signal);
+            await new Promise((resolve) => window.setTimeout(resolve, props.pollIntervalMs));
+            if (!abort.signal.aborted) status = await getJob<DglJob>("", status.id, abort.signal);
         }
     } catch (error) {
         if (!abort.signal.aborted) runError.value = describeError(error);
@@ -237,6 +249,7 @@ onBeforeUnmount(() => runAbort?.abort());
                 </div>
             </div>
             <p v-if="fileError && !namingFile" class="status-message status-message--error" role="alert">{{ fileError }}</p>
+            <p v-if="runError || job?.error" class="status-message status-message--error" role="alert">{{ runError || job?.error?.message }}</p>
             <div class="dgl-code">
                 <div ref="gutter" class="dgl-gutter" aria-hidden="true"><div v-for="line in lineCount" :key="line">{{ line }}</div></div>
                 <div class="dgl-code-buffer">
@@ -244,40 +257,13 @@ onBeforeUnmount(() => runAbort?.abort());
                     <textarea ref="editor" v-model="source" aria-label="DGL source" :readonly="busy" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" @scroll="syncScroll" />
                 </div>
             </div>
-        </section>
-
-        <section class="panel dgl-output" aria-label="Script output">
-            <div class="dgl-heading">
-                <h2>Results</h2>
-                <span v-if="job?.result" class="dgl-unsaved">{{ job.result.type }}</span>
-            </div>
-            <p v-if="running" role="status">{{ job?.status === 'queued' ? 'Queued · Position ' + job.queue_position : 'Running script…' }}</p>
-            <p v-else-if="runError || job?.error" class="status-message status-message--error" role="alert">{{ runError || job?.error?.message }}</p>
-            <template v-else-if="job?.result">
-                <p v-if="!job.result.outputs.length && !job.result.media.length">The script returned no displayable values.</p>
-                <article v-for="media in job.result.media" :key="media.name" class="dgl-result">
-                    <h3>{{ media.name }}</h3>
-                    <p v-if="media.error" class="status-message status-message--error">{{ media.error.message }}</p>
-                    <template v-else-if="media.b64_json">
-                        <img v-if="media.mime_type === 'image/png'" :src="`data:${media.mime_type};base64,${media.b64_json}`" :alt="media.name" />
-                        <video v-else-if="media.mime_type === 'video/webm'" :src="`data:${media.mime_type};base64,${media.b64_json}`" controls preload="metadata" />
-                        <a :href="`data:${media.mime_type};base64,${media.b64_json}`" :download="media.name + (media.mime_type === 'image/png' ? '.png' : media.mime_type === 'video/webm' ? '.webm' : '.avi')">Download {{ media.name }}</a>
-                    </template>
-                </article>
-                <article v-for="(output, index) in job.result.outputs" :key="output.name" class="dgl-result">
-                    <h3>{{ output.name }}</h3>
-                    <div class="dgl-result__shape"><code>{{ dtypeNames[output.dtype] ?? output.dtype }} [{{ output.shape.join(', ') }}]</code><span>{{ output.bytes.toLocaleString() }} B</span></div>
-                    <button v-if="output.frames" class="btn-secondary" type="button" @click="inspectFrames[index] = !inspectFrames[index]">{{ inspectFrames[index] ? 'Hide tensor frames' : 'Inspect tensor frames' }}</button>
-                    <img v-if="inspectFrames[index] && output.frames" :src="dglPreviewUrl(job.id, index, frameNumbers[index] ?? 0)" :alt="output.name" loading="lazy" />
-                    <label v-if="inspectFrames[index] && output.frames > 1" class="dgl-frames">
-                        <span>Frame {{ (frameNumbers[index] ?? 0) + 1 }} of {{ output.frames }}</span>
-                        <input type="range" min="0" :max="output.frames - 1" :value="frameNumbers[index] ?? 0"
-                            @change="frameNumbers[index] = Number(($event.target as HTMLInputElement).value)" />
-                    </label>
-                    <pre v-if="output.value !== undefined">{{ output.value }}</pre>
-                </article>
-            </template>
-            <p v-else>Run a script to see its output.</p>
+            <GenerationProgress v-if="active && job" class="dgl-progress" :job="job" show-finished-progress>
+                <template #actions>
+                    <div v-if="runResult" class="stage-actions">
+                        <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="showRunResult">View result</button>
+                    </div>
+                </template>
+            </GenerationProgress>
         </section>
 
         <dialog ref="saveNameDialog" class="generation-details dgl-save-dialog" aria-labelledby="dgl-save-title"
@@ -298,13 +284,37 @@ onBeforeUnmount(() => runAbort?.abort());
             </form>
         </dialog>
 
+        <dialog v-if="runResult" ref="resultDialog" class="generation-details"
+            aria-labelledby="dgl-run-result-title" @close="resultDialogOpen = false">
+            <div class="generation-details__header">
+                <h2 id="dgl-run-result-title">Run result</h2>
+                <form method="dialog"><button class="btn-ghost" type="submit" autofocus>Close</button></form>
+            </div>
+            <div v-if="resultDialogOpen" class="generation-details__body">
+                <span class="dgl-unsaved">{{ runResult.type }}</span>
+                <article v-for="media in runResult.media" :key="media.name" class="dgl-result">
+                    <h3>{{ media.name }}</h3>
+                    <p v-if="media.error" class="status-message status-message--error">{{ media.error.message }}</p>
+                    <template v-else-if="media.b64_json">
+                        <img v-if="media.mime_type === 'image/png'" :src="`data:${media.mime_type};base64,${media.b64_json}`" :alt="media.name" />
+                        <video v-else-if="media.mime_type === 'video/webm'" :src="`data:${media.mime_type};base64,${media.b64_json}`" controls preload="metadata" />
+                        <a :href="`data:${media.mime_type};base64,${media.b64_json}`" :download="media.name + (media.mime_type === 'image/png' ? '.png' : media.mime_type === 'video/webm' ? '.webm' : '.avi')">Download {{ media.name }}</a>
+                    </template>
+                </article>
+                <article v-for="output in runResult.outputs" :key="output.name" class="dgl-result">
+                    <h3>{{ output.name }}</h3>
+                    <div class="dgl-result__shape"><code>{{ dtypeNames[output.dtype] ?? output.dtype }} [{{ output.shape.join(', ') }}]</code><span>{{ output.bytes.toLocaleString() }} B</span></div>
+                    <pre v-if="output.value !== undefined">{{ output.value }}</pre>
+                </article>
+            </div>
+        </dialog>
     </main>
 </template>
 
 <style scoped>
 .dgl-workspace {
     display: grid;
-    grid-template-columns: minmax(172px, 0.8fr) minmax(0, 3fr) minmax(220px, 1.35fr);
+    grid-template-columns: minmax(172px, 0.8fr) minmax(0, 4.35fr);
     align-items: start;
     gap: 14px;
     margin: 22px 0 0;
@@ -316,7 +326,7 @@ onBeforeUnmount(() => runAbort?.abort());
     gap: 8px;
 }
 .dgl-heading, .dgl-directory, .dgl-result__shape { justify-content: space-between; }
-.dgl-heading h1, .dgl-heading h2 { margin: 0; font-size: 15px; }
+.dgl-heading h1 { margin: 0; font-size: 15px; }
 .dgl-directory { margin: 6px 0; font-size: 12px; color: var(--muted); }
 .dgl-directory code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dgl-file-search { margin: 8px 0; }
@@ -393,23 +403,20 @@ onBeforeUnmount(() => runAbort?.abort());
 .dgl-code-buffer .string { color: var(--code-string); }
 .dgl-code-buffer .number { color: var(--code-number); }
 .dgl-code-buffer .call { color: var(--code-call); }
+.dgl-progress { margin-top: 8px; }
 .dgl-save-form { display: grid; gap: 14px; }
 .dgl-save-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dgl-result { padding: 12px 0; border-top: 1px solid var(--border); }
 .dgl-result:first-of-type { margin-top: 12px; }
 .dgl-result h3 { font: 600 13px var(--font-mono); margin: 0 0 6px; overflow-wrap: anywhere; }
 .dgl-result__shape { font-size: 12px; color: var(--muted); flex-wrap: wrap; }
-.dgl-result img, .dgl-result video { width: 100%; max-height: 360px; object-fit: contain; margin-top: 8px; border-radius: 6px; background: var(--panel-subtle); }
+.dgl-result :is(img, video) { display: block; max-width: 100%; max-height: 360px; object-fit: contain; margin-top: 8px; border-radius: 6px; background: var(--panel-subtle); }
 .dgl-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 var(--font-mono); margin: 8px 0 0; }
-.dgl-frames { display: grid; gap: 4px; margin-top: 8px; font-size: 12px; }
 @media (max-width: 1050px) {
     .dgl-workspace { grid-template-columns: minmax(150px, 1fr) minmax(0, 4fr); }
-    .dgl-output { grid-column: 2; }
-    .dgl-result img { width: auto; max-width: 100%; }
 }
 @media (max-width: 620px) {
     .dgl-workspace { grid-template-columns: minmax(0, 1fr); }
-    .dgl-output { grid-column: auto; }
     .dgl-files ul { max-height: 148px; }
 }
 @media (forced-colors: active) {

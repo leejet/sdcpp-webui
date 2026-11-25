@@ -223,6 +223,8 @@ export interface Job {
   } | null;
 }
 
+export type ProgressJob = Pick<Job, "status" | "cancel_requested" | "queue_position" | "started" | "completed" | "progress" | "preview">;
+
 // ---------------------------------------------------------------------------
 // Cache mode literal union
 // ---------------------------------------------------------------------------
@@ -302,7 +304,7 @@ export interface DglMedia {
     error?: { code: string; message: string };
 }
 
-export interface DglJob {
+export interface DglJob extends Omit<ProgressJob, "preview"> {
     id: string;
     status: "queued" | "generating" | "completed" | "failed" | "cancelled";
     queue_position: number;

@@ -1,4 +1,4 @@
-import type { Capabilities, Job, Recipe, ModelFile, ModelStatus, CatalogError, DglJob } from "./types";
+import type { Capabilities, Job, Recipe, ModelFile, ModelStatus, CatalogError, DglJob, ProgressJob } from "./types";
 
 function withBase(baseUrl: string, path: string): string {
     const base = String(baseUrl || window.location.pathname).trim().replace(/\/+$/, "");
@@ -45,8 +45,8 @@ export function submitVideoJob(baseUrl: string, body: unknown): Promise<Job> {
     });
 }
 
-export function getJob(baseUrl: string, id: string): Promise<Job> {
-    return fetchJson<Job>(withBase(baseUrl, `/sdcpp/v1/jobs/${id}`), { cache: "no-store" });
+export function getJob<T extends ProgressJob = Job>(baseUrl: string, id: string, signal?: AbortSignal): Promise<T> {
+    return fetchJson<T>(withBase(baseUrl, `/sdcpp/v1/jobs/${encodeURIComponent(id)}`), { cache: "no-store", signal });
 }
 
 export function cancelJob(baseUrl: string, id: string): Promise<Job> {
@@ -93,12 +93,4 @@ export function submitDglJob(source: string, signal: AbortSignal): Promise<DglJo
         body: JSON.stringify({ source }),
         signal,
     });
-}
-
-export function getDglJob(id: string, signal: AbortSignal): Promise<DglJob> {
-    return fetchJson(withBase("", `${dglPath}/jobs/${encodeURIComponent(id)}`), { cache: "no-store", signal });
-}
-
-export function dglPreviewUrl(id: string, output: number, frame: number): string {
-    return withBase("", `${dglPath}/jobs/${encodeURIComponent(id)}/outputs/${output}?frame=${frame}`);
 }

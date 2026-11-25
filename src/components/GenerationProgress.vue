@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { Job } from "../lib/types";
+import type { ProgressJob } from "../lib/types";
 
-const props = defineProps<{ job: Job; now: number }>();
+const props = defineProps<{ job: ProgressJob; now?: number; showFinishedProgress?: boolean }>();
+const clock = ref(Date.now());
+const now = computed(() => props.now ?? clock.value);
 const receivedAt = ref(Date.now());
 watch(() => props.job, () => { receivedAt.value = Date.now(); });
 
 const stages: Record<string, string> = {
     queued: "Queued",
     waiting: "Waiting for execution",
+    executing: "Running script",
     loading: "Loading model components",
     preparing: "Preparing generation",
     conditioning: "Encoding prompt",
@@ -17,6 +20,7 @@ const stages: Record<string, string> = {
     vae_decode: "Decoding output",
     audio_decode: "Decoding audio",
     upscaling: "Upscaling",
+    video_upscale: "Upscaling video",
     adetailer: "ADetailer",
     encoding: "Encoding output",
 };
@@ -35,6 +39,12 @@ const details: Record<string, string> = {
 };
 const progress = computed(() => props.job.progress);
 const running = computed(() => props.job.status === "queued" || props.job.status === "generating");
+watch([running, () => props.now === undefined], ([active, useLocalClock], _, onCleanup) => {
+    if (!active || !useLocalClock) return;
+    clock.value = Date.now();
+    const timer = window.setInterval(() => { clock.value = Date.now(); }, 100);
+    onCleanup(() => window.clearInterval(timer));
+}, { immediate: true });
 const stage = computed(() => props.job.status === "queued" ? "queued" : progress.value?.stage);
 const label = computed(() => {
     if (!running.value) return ({ completed: "Completed", failed: "Failed", cancelled: "Cancelled" } as Record<string, string>)[props.job.status] || props.job.status;
@@ -49,6 +59,12 @@ const total = computed(() => progress.value ? progress.value.total : props.job.p
 const completed = computed(() => progress.value ? progress.value.completed : props.job.preview?.step);
 const determinate = computed(() => total.value != null && total.value > 0 && completed.value != null);
 const value = computed(() => determinate.value ? Math.max(0, Math.min(completed.value!, total.value!)) : undefined);
+const showTrack = computed(() => running.value || props.showFinishedProgress);
+const trackMax = computed(() => total.value && total.value > 0 ? total.value : 1);
+const trackValue = computed(() => {
+    if (running.value || !props.showFinishedProgress) return value.value;
+    return props.job.status === "completed" ? trackMax.value : value.value ?? 0;
+});
 const percent = computed(() => determinate.value ? Math.floor(value.value! / total.value! * 100) : null);
 const unit = computed(() => progress.value?.unit || "steps");
 const pass = computed(() => {
@@ -59,13 +75,13 @@ const pass = computed(() => {
 });
 const stageElapsed = computed(() => {
     if (!progress.value) return null;
-    const elapsed = progress.value.stage_elapsed_ms + (running.value ? Math.max(0, props.now - receivedAt.value) : 0);
+    const elapsed = progress.value.stage_elapsed_ms + (running.value ? Math.max(0, now.value - receivedAt.value) : 0);
     return (elapsed / 1000).toFixed(1);
 });
 const elapsed = computed(() => {
     const ms = props.job.started
-        ? (props.job.completed || props.now) - props.job.started
-        : (progress.value?.elapsed_ms || 0) + (running.value && stage.value !== "queued" ? Math.max(0, props.now - receivedAt.value) : 0);
+        ? (props.job.completed || now.value) - props.job.started
+        : (progress.value?.elapsed_ms || 0) + (running.value && stage.value !== "queued" ? Math.max(0, now.value - receivedAt.value) : 0);
     const seconds = Math.max(0, ms) / 1000;
     return seconds < 60 ? `${seconds.toFixed(1)}s` : `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
 });
@@ -86,7 +102,7 @@ const description = computed(() => [label.value, detail.value, pass.value ? `Pas
             </div>
             <slot name="actions" />
         </div>
-        <progress :class="{ 'generation-progress__inactive': !running }" :value="value" :max="total && total > 0 ? total : 1" :aria-label="label" :aria-hidden="!running" />
+        <progress :class="{ 'generation-progress__inactive': !showTrack }" :value="trackValue" :max="trackMax" :aria-label="label" :aria-hidden="!showTrack" />
     </div>
 </template>
 
