@@ -359,6 +359,12 @@ button {
     font-weight: 600;
 }
 
+.settings__api-key {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+}
+
 .settings .checkbox input[type="checkbox"] {
     width: auto;
     flex: none;

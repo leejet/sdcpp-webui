@@ -1,4 +1,5 @@
 import { createExpandButton, createPlaybackControls, createPlaybackPicture } from "./media-preview";
+import { fetchServerMedia } from "./api";
 
 type Chunk = { id: string; data: number; size: number; end: number };
 type Frame = { offset: number; size: number };
@@ -27,7 +28,7 @@ class AviReader {
         let page = this.page;
         if (!page || offset < page.offset || offset + length > page.offset + page.data.byteLength) {
             const end = Math.min(this.size, offset + Math.max(length, pageSize)) - 1;
-            const response = await fetch(this.url, { headers: { Range: "bytes=" + offset + "-" + end }, signal: this.signal });
+            const response = await fetchServerMedia(this.url, { headers: { Range: "bytes=" + offset + "-" + end }, signal: this.signal });
             if (response.status !== 206 || response.headers.get("Content-Range") !== "bytes " + offset + "-" + end + "/" + this.size) {
                 throw new Error("Could not read AVI byte range");
             }
@@ -366,7 +367,7 @@ export function createAviPreview(card: HTMLElement, url: string, path: string, u
 
     async function load(preflight?: Response): Promise<void> {
         try {
-            const response = preflight ?? await fetch(url, { method: "HEAD", signal: abort.signal });
+            const response = preflight ?? await fetchServerMedia(url, { method: "HEAD", signal: abort.signal });
             const size = Number(response.headers.get("Content-Length"));
             if (!response.ok || !Number.isSafeInteger(size) || size < 12) throw new Error("Cannot open AVI");
             reader = new AviReader(url, size, abort.signal);

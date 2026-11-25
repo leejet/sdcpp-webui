@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { getCapabilities, getJob, listDglScripts, loadDglScript, saveDglScript, submitDglJob } from "../lib/api";
 import { createStoredRef } from "../lib/settings";
 import type { DglJob } from "../lib/types";
 import DglEditor from "./DglEditor.vue";
 import GenerationProgress from "./GenerationProgress.vue";
 
-const props = defineProps<{ active: boolean; pollIntervalMs: number }>();
+const props = defineProps<{ active: boolean; pollIntervalMs: number; serverAuthRevision: number }>();
 const emit = defineEmits<{ (event: "expand-image", src: string, alt: string): void }>();
 
 const starter = '# version: 0.0.0\n\nfn main() {\n    return "Hello, DGL"\n}\n';
@@ -190,10 +190,13 @@ async function runScript(): Promise<void> {
     }
 }
 
-onMounted(() => {
+watch(() => props.serverAuthRevision, (revision) => {
+    mediaAllowed.value = false;
     void refreshFiles(true);
-    void getCapabilities("").then((response) => { mediaAllowed.value = response.media_view === true; }, () => {});
-});
+    void getCapabilities("").then((response) => {
+        if (props.serverAuthRevision === revision) mediaAllowed.value = response.media_view === true;
+    }, () => {});
+}, { immediate: true });
 onBeforeUnmount(() => runAbort?.abort());
 </script>
 

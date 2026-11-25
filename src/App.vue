@@ -14,7 +14,7 @@ import MediaDropzone from "./components/MediaDropzone.vue";
 import StatusChip from "./components/StatusChip.vue";
 import GenerationProgress from "./components/GenerationProgress.vue";
 import DglWorkspace from "./components/DglWorkspace.vue";
-import { cancelJob, getCapabilities, getJob, submitImageJob, submitVideoJob } from "./lib/api";
+import { cancelJob, getCapabilities, getJob, readServerApiKey, saveServerApiKey, submitImageJob, submitVideoJob } from "./lib/api";
 import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFromCapabilities } from "./lib/form";
 import { availableCacheModes, featuresForMode, supportsEta, supportsFlowShift, usesSCM } from "./lib/generation-features";
 import { assignImageEntries, clearImageEntries, filesToImageEntries, removeImageEntry } from "./lib/images";
@@ -39,6 +39,8 @@ import type {
 
 const brandIcon = `data:image/svg+xml,${encodeURIComponent(brandSvg)}`;
 const baseUrl = createStoredRef<string>("sdcpp-webui-base-url", "", (value: unknown) => String(value || ""));
+const serverApiKey = ref(readServerApiKey(baseUrl.value));
+const serverAuthRevision = ref(0);
 const pollIntervalMs = createStoredRef<number>("sdcpp-webui-poll-interval-ms", 100, normalizePollIntervalMs);
 const preferredPreviewMode = createStoredRef<string>("sdcpp-webui-preview-mode", "none", (value: unknown) => typeof value === "string" ? value : "none");
 const previewInterval = createStoredRef<number>("sdcpp-webui-preview-interval", 1, normalizePreviewInterval);
@@ -410,11 +412,15 @@ function selectRecipe(recipe: Recipe, refreshCurrent = true): void {
     if (!useSelectedRecipe.value && refreshCurrent) void refreshCapabilities(true);
 }
 
+let capabilitiesRequest = 0;
+
 async function refreshCapabilities(preserveMessage = false): Promise<void> {
+    const request = ++capabilitiesRequest;
     loadingCapabilities.value = true;
     capabilitiesError.value = "";
     try {
         const response = await getCapabilities(baseUrl.value);
+        if (request !== capabilitiesRequest) return;
         const initializeForm = !capabilities.value;
         const modelChanged = response.runtime?.revision !== capabilities.value?.runtime?.revision;
         capabilities.value = response;
@@ -434,12 +440,25 @@ async function refreshCapabilities(preserveMessage = false): Promise<void> {
         ensureOutputFormatForMode();
         if (!preserveMessage) clearMessage();
     } catch (error) {
+        if (request !== capabilitiesRequest) return;
         capabilitiesError.value = error instanceof Error ? error.message : String(error);
         serviceOnline.value = false;
         if (!preserveMessage) setMessage(capabilitiesError.value, "error");
     } finally {
-        loadingCapabilities.value = false;
+        if (request === capabilitiesRequest) loadingCapabilities.value = false;
     }
+}
+
+function applyServerApiKey(): void {
+    try {
+        saveServerApiKey(baseUrl.value, serverApiKey.value);
+        serverApiKey.value = readServerApiKey(baseUrl.value);
+    } catch (error) {
+        capabilitiesError.value = error instanceof Error ? error.message : String(error);
+        return;
+    }
+    serverAuthRevision.value += 1;
+    void refreshCapabilities();
 }
 
 function toggleSection(section: string): void {
@@ -779,7 +798,10 @@ async function acceptReferenceFiles(files: FileList): Promise<void> {
     }
 }
 
-watch(baseUrl, () => { selectedRecipe.value = null; });
+watch(baseUrl, (value) => {
+    selectedRecipe.value = null;
+    serverApiKey.value = readServerApiKey(value);
+});
 
 watch(cacheModes, (modes) => { if (!modes.includes(form.cache.mode)) form.cache.mode = "disabled"; });
 watch(generationFeatures, (features) => {
@@ -843,8 +865,17 @@ onBeforeUnmount(() => {
                         </select>
                     </div>
                     <div class="field">
-                        <label>Base URL</label>
-                        <input v-model="baseUrl" placeholder="Leave blank to use same origin" />
+                        <label for="server-base-url">Base URL</label>
+                        <input id="server-base-url" v-model="baseUrl" placeholder="Leave blank to use same origin" />
+                    </div>
+                    <div class="field">
+                        <label for="server-api-key">Server API Key</label>
+                        <div class="settings__api-key">
+                            <input id="server-api-key" v-model="serverApiKey" type="password" autocomplete="off" spellcheck="false"
+                                placeholder="Optional" aria-describedby="server-api-key-note" @keydown.enter.prevent="applyServerApiKey" />
+                            <button class="btn-secondary" type="button" @click="applyServerApiKey">Apply</button>
+                        </div>
+                        <span id="server-api-key-note" class="hint">Saved in this tab for the selected server.</span>
                     </div>
                     <div class="field">
                         <label>Queue Limit</label>
@@ -927,7 +958,8 @@ onBeforeUnmount(() => {
                 <div v-if="capabilitiesError" class="status-message status-message--error">{{ capabilitiesError }}</div>
             </div>
         </section>
-        <DglWorkspace v-if="dglVisited" v-show="dglOpen && !settingsOpen" :active="dglOpen && !settingsOpen" :poll-interval-ms="pollIntervalMs" @expand-image="openLightbox" />
+        <DglWorkspace v-if="dglVisited" v-show="dglOpen && !settingsOpen" :active="dglOpen && !settingsOpen" :poll-interval-ms="pollIntervalMs"
+            :server-auth-revision="serverAuthRevision" @expand-image="openLightbox" />
         <main v-show="!settingsOpen && !dglOpen" class="studio-workspace">
             <section class="output-stage" aria-label="Generated output" @dragover="onReferenceDragover" @drop="onReferenceDrop">
                 <div class="output-canvas" :style="{ '--output-ratio': outputAspectRatio }">
@@ -999,7 +1031,9 @@ onBeforeUnmount(() => {
                         @clear-media="kind => kind === 'video' ? videoInput.clear() : audioInput.clear()" @preview-media="sectionState.referenceMedia = true; composer?.openMore($event)" />
                 </template>
                 <template #models>
-        <ModelSelector embedded v-model:apply-defaults="applyRecipeDefaultsOnSelect" :base-url="baseUrl" :busy="isJobRunning || submitting" :current-recipe="capabilities?.runtime?.runtime_recipe" :lora-summary="loraSummary" @changed="refreshCapabilities()" @recipe="selectRecipe" @selection="updateModelSelection" @catalog-recipe="updateCatalogRecipe">
+        <ModelSelector embedded v-model:apply-defaults="applyRecipeDefaultsOnSelect" :base-url="baseUrl" :server-auth-revision="serverAuthRevision"
+            :busy="isJobRunning || submitting" :current-recipe="capabilities?.runtime?.runtime_recipe" :lora-summary="loraSummary"
+            @changed="refreshCapabilities()" @recipe="selectRecipe" @selection="updateModelSelection" @catalog-recipe="updateCatalogRecipe">
         </ModelSelector>
                 </template>
                 <template #lora>

@@ -4,7 +4,7 @@ import { Compartment, countColumn, EditorState, StateEffect, StateField, type Te
 import { Decoration, EditorView, WidgetType, keymap, lineNumbers } from "@codemirror/view";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { createAviPreview } from "../lib/avi-preview";
-import { mediaViewUrl } from "../lib/api";
+import { fetchServerMedia, mediaViewUrl, readServerApiKey } from "../lib/api";
 import { connectNativePlayback, createExpandButton, createPlaybackPicture } from "../lib/media-preview";
 
 const props = defineProps<{
@@ -127,7 +127,7 @@ class MediaWidget extends WidgetType {
             return {
                 async load() {
                     if (!file.output) return media.load();
-                    const response = await fetch(file.url, { method: "HEAD", signal: lifetime.signal }).catch(() => undefined);
+                    const response = await fetchServerMedia(file.url, { method: "HEAD", signal: lifetime.signal }).catch(() => undefined);
                     if (lifetime.signal.aborted || response?.status === 404) return;
 
                     card.hidden = false;
@@ -237,12 +237,29 @@ function addPreviewResizeHandle(editor: EditorView, block: HTMLElement, card: HT
 
 function connectMediaSource(media: HTMLImageElement | HTMLVideoElement, url: string, unavailable: () => void): RenderedMedia {
     const abort = new AbortController();
+    let mediaUrl = "";
     media.addEventListener("error", unavailable, { once: true, signal: abort.signal });
     return {
-        load() { media.src = url; },
+        async load() {
+            if (!readServerApiKey("")) {
+                media.src = url;
+                return;
+            }
+            try {
+                const response = await fetchServerMedia(url, { signal: abort.signal });
+                if (!response.ok) throw new Error("Cannot load media");
+                const blob = await response.blob();
+                if (abort.signal.aborted) return;
+                mediaUrl = URL.createObjectURL(blob);
+                media.src = mediaUrl;
+            } catch {
+                if (!abort.signal.aborted) unavailable();
+            }
+        },
         destroy() {
             abort.abort();
             media.removeAttribute("src");
+            if (mediaUrl) URL.revokeObjectURL(mediaUrl);
         },
     };
 }

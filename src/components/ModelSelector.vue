@@ -6,7 +6,7 @@ import { createStoredRef } from "../lib/settings";
 import { getModelFiles, getModelStatus, getRecipes, refreshModels } from "../lib/api";
 import type { CatalogError, ModelFile, ModelStatus, Recipe } from "../lib/types";
 
-const props = defineProps<{ baseUrl: string; busy: boolean; applyDefaults: boolean; currentRecipe?: Recipe; loraSummary?: string; embedded?: boolean }>();
+const props = defineProps<{ baseUrl: string; serverAuthRevision: number; busy: boolean; applyDefaults: boolean; currentRecipe?: Recipe; loraSummary?: string; embedded?: boolean }>();
 const emit = defineEmits<{
     (event: "update:applyDefaults", value: boolean): void;
     (event: "changed"): void;
@@ -148,7 +148,7 @@ function saveSelection(): void {
 
 watch([selectedId, selection], saveSelection, { deep: true });
 
-watch(() => props.baseUrl, () => {
+watch(() => [props.baseUrl, props.serverAuthRevision], () => {
     revision++;
     status.value = null;
     recipes.value = [];
