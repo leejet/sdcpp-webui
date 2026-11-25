@@ -891,8 +891,11 @@ onBeforeUnmount(() => {
 
                 <fieldset class="settings__group stack-top">
                     <legend>Notifications</legend>
-                    <label class="checkbox"><input v-model="notifyOnCompletion" type="checkbox" :disabled="!notificationSupported" @change="onNotifyToggle" /><span>Notify me when generation finishes</span></label>
-                    <div class="hint stack-top">{{ notificationStatusMessage }}</div>
+                    <label class="checkbox settings__notification-toggle">
+                        <input v-model="notifyOnCompletion" type="checkbox" :disabled="!notificationSupported" aria-describedby="notification-status" @change="onNotifyToggle" />
+                        <span>Notify me when generation finishes</span>
+                    </label>
+                    <div id="notification-status" class="hint settings__notification-status">{{ notificationStatusMessage }}</div>
                 </fieldset>
 
                 <fieldset v-if="hasFeature('vae_tiling')" class="settings__group stack-top">

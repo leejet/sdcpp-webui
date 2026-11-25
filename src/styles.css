@@ -359,6 +359,15 @@ button {
     font-weight: 600;
 }
 
+.settings .checkbox input[type="checkbox"] {
+    width: auto;
+    flex: none;
+    margin: 0;
+}
+
+.settings__notification-toggle { display: flex; }
+.settings__notification-status { margin: 4px 0 0 21px; }
+
 .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(420px, 520px);
