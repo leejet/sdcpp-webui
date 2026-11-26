@@ -21,6 +21,10 @@ let pendingSize: Dimensions | null = null;
 const size = computed(() => ({ width: props.width, height: props.height }));
 const error = computed(() => dimensionError(size.value, props.limits, props.sizeMultiple));
 const recommendedSize = computed(() => alignDimensions(props.recommended, props.sizeMultiple));
+const selectedTier = computed(() => {
+    if (tier.value === "model-default" && (props.width !== recommendedSize.value.width || props.height !== recommendedSize.value.height)) return "custom";
+    return tier.value;
+});
 const correctedSize = computed(() => {
     if (!(props.width > 0 && props.height > 0)) return null;
     const next = alignDimensions(size.value, props.sizeMultiple);
@@ -49,8 +53,9 @@ watch(() => [props.width, props.height, props.mode, props.sizeMultiple] as const
     }
 }, { immediate: true });
 
-function commit(next: Dimensions): void {
+function commit(next: Dimensions, nextTier = "custom"): void {
     ratioError.value = "";
+    tier.value = nextTier;
     pendingSize = next;
     emit("change", next);
 }
@@ -64,15 +69,13 @@ function chooseRatio(value: number): void {
     if (invalid) { ratioError.value = invalid; return; }
     ratio.value = value;
     locked.value = true;
-    commit(next);
+    commit(next, preset?.id);
 }
 
 function choosePreset(id: string): void {
     const preset = presetSizes.value.find((item) => item.id === id);
     if (!preset || dimensionError(preset.size, props.limits, props.sizeMultiple)) return;
-    tier.value = id;
-    ratioError.value = "";
-    commit(preset.size);
+    commit(preset.size, id);
 }
 
 function editDimension(axis: "width" | "height", event: Event): void {
@@ -84,27 +87,24 @@ function editDimension(axis: "width" | "height", event: Event): void {
     } else if (!locked.value && next.width > 0 && next.height > 0) {
         ratio.value = next.width / next.height;
     }
-    tier.value = "custom";
     commit(next);
 }
 
 function swap(): void {
     ratio.value = 1 / ratio.value;
-    commit({ width: props.height, height: props.width });
+    const nextTier = tier.value === "model-default" && props.width !== props.height ? "custom" : tier.value;
+    commit({ width: props.height, height: props.width }, nextTier);
 }
 
 function recommend(): void {
     ratio.value = recommendedSize.value.width / recommendedSize.value.height;
-    tier.value = "custom";
-    ratioError.value = "";
-    commit(recommendedSize.value);
+    commit(recommendedSize.value, "model-default");
 }
 
 function correctSize(): void {
     if (!correctedSize.value) return;
     const next = correctedSize.value;
     if (!locked.value) ratio.value = next.width / next.height;
-    tier.value = "custom";
     commit(next);
 }
 </script>
@@ -125,16 +125,16 @@ function correctSize(): void {
     <section aria-labelledby="resolution-heading">
         <div class="resolution-heading"><h3 id="resolution-heading">Resolution</h3></div>
         <div class="resolution-options">
-            <button class="resolution-option" type="button" :disabled="Boolean(dimensionError(recommendedSize, limits, sizeMultiple))" @click="recommend">
+            <button class="resolution-option" type="button" :aria-pressed="selectedTier === 'model-default'" :disabled="Boolean(dimensionError(recommendedSize, limits, sizeMultiple))" @click="recommend">
                 <strong>Model default</strong><span>{{ recommendedSize.width }} × {{ recommendedSize.height }}</span>
             </button>
             <button v-for="preset in presetSizes" :key="preset.id" class="resolution-option" type="button"
-                :aria-pressed="tier === preset.id" :disabled="Boolean(dimensionError(preset.size, limits, sizeMultiple))" @click="choosePreset(preset.id)">
+                :aria-pressed="selectedTier === preset.id" :disabled="Boolean(dimensionError(preset.size, limits, sizeMultiple))" @click="choosePreset(preset.id)">
                 <strong>{{ preset.label }}</strong><span>{{ preset.size.width }} × {{ preset.size.height }}</span>
             </button>
         </div>
         <p class="hint">{{ mode === 'image' ? 'Image tiers use a pixel budget; dimensions follow the aspect ratio.' : 'Video tiers set the short edge in pixels, including portrait video.' }}</p>
-        <div class="resolution-heading"><h3>Exact dimensions <span v-if="tier === 'custom'">· Custom</span></h3><button class="btn-ghost" type="button" :aria-pressed="locked" @click="locked = !locked">{{ locked ? 'Ratio locked' : 'Ratio unlocked' }}</button></div>
+        <div class="resolution-heading"><h3>Exact dimensions <span v-if="selectedTier === 'custom'">· Custom</span></h3><button class="btn-ghost" type="button" :aria-pressed="locked" @click="locked = !locked">{{ locked ? 'Ratio locked' : 'Ratio unlocked' }}</button></div>
         <div class="fields">
             <div class="field"><label for="output-width">Width (px)</label><input id="output-width" :value="width" type="number" :min="alignDimension(limits?.min_width ?? 64, sizeMultiple)" :max="limits?.max_width ?? 4096" :step="sizeMultiple" @input="editDimension('width', $event)" /></div>
             <div class="field"><label for="output-height">Height (px)</label><input id="output-height" :value="height" type="number" :min="alignDimension(limits?.min_height ?? 64, sizeMultiple)" :max="limits?.max_height ?? 4096" :step="sizeMultiple" @input="editDimension('height', $event)" /></div>
