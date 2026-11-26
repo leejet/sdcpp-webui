@@ -112,7 +112,8 @@
 .output-stage .stage-message { max-height: 80px; overflow-y: auto; padding: 10px 14px; }
 .stage-footer { width: 100%; height: 40px; }
 .stage-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
-.stage-actions button { padding: 7px 12px; font-size: 12px; }
+.stage-actions :is(button, .stage-compare-select) { padding: 7px 12px; font-size: 12px; }
+.stage-compare-button[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--border-strong); }
 .generation-details { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: 20px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
 .generation-details::backdrop { background: rgba(0, 0, 0, 0.4); }
 .generation-details__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
@@ -314,6 +315,11 @@
     .studio-settings { padding: 16px; margin: 20px auto; }
     .composer-panel input, .composer-panel select, .composer-panel textarea { font-size: 16px; }
     .resolution-heading { flex-wrap: wrap; }
+}
+
+@media (max-width: 380px) {
+    .stage-actions:has(.stage-compare-button, .stage-compare-select) { gap: 4px; }
+    .stage-actions:has(.stage-compare-button, .stage-compare-select) :is(button, .stage-compare-select) { padding-inline: 7px; }
 }
 
 

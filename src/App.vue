@@ -13,6 +13,7 @@ import SearchableSelect from "./components/SearchableSelect.vue";
 import MediaDropzone from "./components/MediaDropzone.vue";
 import StatusChip from "./components/StatusChip.vue";
 import GenerationProgress from "./components/GenerationProgress.vue";
+import ImageCompare from "./components/ImageCompare.vue";
 import DglWorkspace from "./components/DglWorkspace.vue";
 import { cancelJob, getCapabilities, getJob, readServerApiKey, saveServerApiKey, submitImageJob, submitVideoJob } from "./lib/api";
 import { applyRecipeDefaults, buildRequestBodyForMode, createBlankForm, formFromCapabilities } from "./lib/form";
@@ -97,6 +98,8 @@ const modelSelectionComplete = ref(false);
 const defaultModelConfigured = computed(() => Boolean(capabilities.value?.model?.name));
 const currentJob = ref<Job | null>(null);
 const selectedOutputIndex = ref(0);
+const comparisonIndex = ref<number | null>(0);
+const submittedComparison = ref<{ jobId: string; initialImage: string | null; referenceImages: string[] } | null>(null);
 const submittedAspectRatio = ref<number | null>(null);
 const statusMessage = ref("");
 const statusTone = ref("");
@@ -213,6 +216,16 @@ const selectedImage = computed(() => {
     const image = currentImages.value[index];
     const format = currentJob.value?.result?.output_format || form.output_format || "png";
     return `data:image/${format};base64,${image.b64_json}`;
+});
+const comparisonInputs = computed(() => {
+    const inputs = submittedComparison.value;
+    if (currentStatus.value !== "completed" || !selectedImage.value || !inputs || inputs.jobId !== currentJob.value?.id) return null;
+    return inputs.initialImage || inputs.referenceImages.length ? inputs : null;
+});
+const comparisonSource = computed(() => {
+    const inputs = comparisonInputs.value;
+    const index = comparisonIndex.value;
+    return inputs && index !== null ? inputs.initialImage || inputs.referenceImages[index] : null;
 });
 const videoMimeType = computed(() => currentJobKind.value === "vid_gen" ? currentJob.value?.result?.mime_type || "" : "");
 const videoFrameCount = computed(() => currentJobKind.value === "vid_gen" ? currentJob.value?.result?.frame_count || 0 : 0);
@@ -620,20 +633,27 @@ async function generate(): Promise<void> {
     submitting.value = true;
     try {
         await ensureNotificationPermission();
-        const request = buildRequestBodyForMode(generationMode.value, {
+        const mode = generationMode.value;
+        const request = buildRequestBodyForMode(mode, {
             ...form,
-            ...(generationMode.value === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
+            ...(mode === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
             lora: loras.value.filter((item) => !loraInactiveReason(item)),
             preview_mode: previewMode.value,
             preview_interval: normalizePreviewInterval(previewInterval.value),
         }, generationFeatures.value);
         clearMessage();
-        selectedOutputIndex.value = 0;
         startElapsedTimer();
         const body = model ? { ...request, model } : request;
-        const job = generationMode.value === "video"
+        const job = mode === "video"
             ? await submitVideoJob(baseUrl.value, body)
             : await submitImageJob(baseUrl.value, body);
+        selectedOutputIndex.value = 0;
+        comparisonIndex.value = 0;
+        submittedComparison.value = mode === "image" ? {
+            jobId: job.id,
+            initialImage: request.init_image || null,
+            referenceImages: request.init_image ? [] : request.ref_images || [],
+        } : null;
         const ratio = Number(request.width) / Number(request.height);
         submittedAspectRatio.value = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
         currentJob.value = job;
@@ -972,6 +992,9 @@ onBeforeUnmount(() => {
                     <div v-else-if="videoPreviewSrc" class="hero-frame hero-frame--media">
                         <video class="hero-frame__video" :src="videoPreviewSrc" controls autoplay loop muted playsinline />
                     </div>
+                    <ImageCompare v-else-if="comparisonSource && selectedImage"
+                        :before-src="comparisonSource" :before-label="comparisonInputs?.initialImage ? 'Before' : 'Reference'" :result-src="selectedImage"
+                        @expand="openLightbox(selectedImage, 'Generated output')" />
                     <button v-else-if="previewImageSrc" class="hero-frame hero-frame--button" type="button" @click="openLightbox(previewImageSrc, 'Generated output')">
                         <img :src="previewImageSrc" alt="Generated output" />
                     </button>
@@ -1009,6 +1032,13 @@ onBeforeUnmount(() => {
                     <GenerationProgress v-if="currentJob" :job="currentJob" :now="nowMilliseconds">
                         <template #actions>
                             <div class="stage-actions">
+                                <select v-if="comparisonInputs && comparisonInputs.referenceImages.length > 1" v-model="comparisonIndex"
+                                    class="btn-ghost stage-compare-select" aria-label="Comparison reference image">
+                                    <option :value="null">Result</option>
+                                    <option v-for="(_, index) in comparisonInputs.referenceImages" :key="index" :value="index">Ref. {{ index + 1 }}</option>
+                                </select>
+                                <button v-else-if="comparisonInputs" class="btn-ghost stage-compare-button" type="button" :aria-pressed="comparisonIndex !== null"
+                                    @click="comparisonIndex = comparisonIndex === null ? 0 : null">Compare</button>
                                 <button class="btn-ghost" type="button" aria-haspopup="dialog" @click="generationDetails?.showModal()">Details</button>
                                 <button v-if="downloadableSrc" class="btn-secondary" type="button" @click="downloadSelected">Download</button>
                             </div>

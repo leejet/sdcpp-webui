@@ -51,6 +51,12 @@ On desktop, the preview fits the space above the composer within the viewport.
 Generation status and result actions share a compact row; Details opens a dialog,
 and batch thumbnails scroll horizontally. Small or short windows allow page
 scrolling so the preview and composer remain accessible.
+For a completed image job with an init image or reference images, the split
+preview starts with the divider at the left edge. Hover over the edge to reveal
+the handle, then drag it to see the input. Touch screens show the handle
+immediately. Focus the divider to move it with the arrow keys. When a job has
+multiple references, the first is selected by default and the result toolbar
+lets you pick another. Switching batch thumbnails keeps the divider in place.
 Negative Prompt sits below Prompt and can be collapsed even when filled. Its
 collapsed row shows a single-line text preview; collapsing preserves the prompt
 used for generation. The expanded state is saved locally, and Clear removes the
