@@ -73,6 +73,12 @@ its text or saved expansion state.
   rounds presets up to the recipe's `size_multiple` (default `8`, including when
   no recipe is selected). Manual dimensions must satisfy this increment and
   server limits; a correction button offers the next valid aligned size.
+- **Follow input image** appears in image generation when an init image or a
+  reference image provides dimensions. It is selected by default and takes the
+  init image first, then the first reference.
+  The UI fits the size within server limits and rounds to the recipe's pixel
+  multiple. Choosing another size switches the draft to manual sizing. Select
+  **Follow input image** again to resume following the input.
 - Image and video drafts, including prompts, sizes, and image inputs, remain
   separate for the current page session and restore when a recipe changes the
   generation mode. Selecting a recipe still applies its

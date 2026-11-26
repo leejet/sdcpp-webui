@@ -8,6 +8,7 @@ export interface ImageEntry {
   name: string;
   type: string;
   dataUrl: string;
+  dimensions?: { width: number; height: number };
 }
 
 export interface MediaReference {

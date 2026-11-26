@@ -5,7 +5,8 @@ import PromptComposer from "./components/PromptComposer.vue";
 import PromptEnhancementSettings from "./components/PromptEnhancementSettings.vue";
 import ReferenceInputs from "./components/ReferenceInputs.vue";
 import brandSvg from "../icon-preview.svg?raw";
-import { dimensionError, sizeMultiple } from "./lib/resolution";
+import { dimensionError, fitInputDimensions, sizeMultiple } from "./lib/resolution";
+import type { Dimensions, InputResolution } from "./lib/resolution";
 import { useVideoLength } from "./lib/video-length";
 import CollapsibleSection from "./components/CollapsibleSection.vue";
 import ModelSelector from "./components/ModelSelector.vue";
@@ -106,6 +107,7 @@ const statusTone = ref("");
 const cancelling = ref(false);
 let pollVersion = 0;
 const form = reactive<GenerationForm>(createBlankForm());
+const followInputSize = ref(true);
 const enhancement = usePromptEnhancement(toRef(form, "prompt"), generationMode);
 const videoConstraints = computed(() => selectedRecipe.value?.video_constraints);
 const videoLength = reactive(useVideoLength(form, videoConstraints));
@@ -114,11 +116,6 @@ const modeDrafts = new Map<GenerationMode, GenerationForm>();
 const videoInput = useMediaInput("video", toRef(form, "ref_video"));
 const audioInput = useMediaInput("audio", toRef(form, "ref_audio"));
 const submitting = ref(false);
-const outputAspectRatio = computed(() => {
-    if (currentJob.value && submittedAspectRatio.value !== null) return submittedAspectRatio.value;
-    const ratio = Number(form.width) / Number(form.height);
-    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-});
 
 let pollTimer = 0;
 let elapsedTimer = 0;
@@ -179,6 +176,26 @@ const generationFeatures = computed<GenerationFeatures>(() => {
     return featuresForMode(features, generationMode.value);
 });
 const hasFeature = (name: string): boolean => Boolean(generationFeatures.value[name]);
+const inputResolution = computed<InputResolution | null>(() => {
+    if (generationMode.value !== "image") return null;
+    const initial = hasFeature("init_image") ? form.init_image?.dimensions : undefined;
+    const reference = hasFeature("ref_images") ? form.ref_images[0]?.dimensions : undefined;
+    const dimensions = initial ?? reference;
+    if (!dimensions) return null;
+    return {
+        label: initial ? "Init image" : "Reference image",
+        size: fitInputDimensions(dimensions, capabilities.value?.limits, dimensionMultiple.value),
+    };
+});
+const generationSize = computed(() => followInputSize.value && inputResolution.value
+    ? inputResolution.value.size
+    : { width: form.width, height: form.height });
+const outputAspectRatio = computed(() => {
+    if (currentJob.value && submittedAspectRatio.value !== null) return submittedAspectRatio.value;
+    const { width, height } = generationSize.value;
+    const ratio = width / height;
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+});
 const mediaProcessing = computed(() => (hasFeature("ref_videos") && form.ref_video?.processing) ||
     (hasFeature("ref_audios") && form.ref_audio?.processing));
 const mediaSummary = computed(() => [hasFeature("ref_videos") && form.ref_video ? "1 video" : "",
@@ -627,20 +644,22 @@ async function generate(): Promise<void> {
         setMessage("Recipe selection in generation requires a server that supports it.", "error");
         return;
     }
-    const invalidSize = dimensionError({ width: form.width, height: form.height }, capabilities.value?.limits, dimensionMultiple.value);
+    const mode = generationMode.value;
+    const size = generationSize.value;
+    const invalidSize = dimensionError(size, capabilities.value?.limits, dimensionMultiple.value);
     if (invalidSize) { setMessage(invalidSize, "error"); return; }
-    if (generationMode.value === "video" && videoLength.error) { setMessage(videoLength.error, "error"); return; }
+    if (mode === "video" && videoLength.error) { setMessage(videoLength.error, "error"); return; }
     submitting.value = true;
     try {
-        await ensureNotificationPermission();
-        const mode = generationMode.value;
         const request = buildRequestBodyForMode(mode, {
             ...form,
+            ...size,
             ...(mode === "video" ? { video_frames: videoLength.frames, fps: videoLength.fps } : {}),
             lora: loras.value.filter((item) => !loraInactiveReason(item)),
             preview_mode: previewMode.value,
             preview_interval: normalizePreviewInterval(previewInterval.value),
         }, generationFeatures.value);
+        await ensureNotificationPermission();
         clearMessage();
         startElapsedTimer();
         const body = model ? { ...request, model } : request;
@@ -701,7 +720,8 @@ function removeLora(index: number): void {
 }
 
 async function assignImages(target: ImageTarget, files: FileList): Promise<void> {
-    const images = await filesToImageEntries(files);
+    const readDimensions = generationMode.value === "image" && (target === "init_image" || target === "ref_images");
+    const images = await filesToImageEntries(files, readDimensions);
     if (!images.length) {
         return;
     }
@@ -722,13 +742,19 @@ function removeCollectionImage(target: "ref_images" | "control_frames", index: n
 
 async function replaceCollectionImage(target: "ref_images" | "control_frames", image: ImageEntry, files: FileList): Promise<void> {
     if (!files.length) return;
-    const [replacement] = await filesToImageEntries([files[0]]);
+    const [replacement] = await filesToImageEntries([files[0]], generationMode.value === "image" && target === "ref_images");
     const index = form[target].indexOf(image);
     if (replacement && index >= 0) form[target].splice(index, 1, replacement);
 }
 
 function selectOutput(index: number): void {
     selectedOutputIndex.value = index;
+}
+
+function setGenerationSize(size: Dimensions): void {
+    if (inputResolution.value) followInputSize.value = false;
+    form.width = size.width;
+    form.height = size.height;
 }
 
 function formatUnixTime(milliseconds: number | undefined): string {
@@ -1052,7 +1078,9 @@ onBeforeUnmount(() => {
                 :video-summary="videoLength.summary" :video-details="videoLength.details"
                 :can-cancel="canCancelCurrentJob" :cancelling="cancelling || Boolean(currentJob?.cancel_requested)"
                 :has-loras="showLoras" :lora-count="loras.filter(item => item.path).length"
-                :limits="capabilities?.limits" :size-multiple="dimensionMultiple" :recommended="recommendedDimensions" @generate="generate" @cancel="cancelCurrentJob"
+                :limits="capabilities?.limits" :size="generationSize" :size-multiple="dimensionMultiple" :recommended="recommendedDimensions"
+                :input-resolution="inputResolution" :following-input-size="followInputSize"
+                @resize="setGenerationSize" @follow-input-size="followInputSize = true" @generate="generate" @cancel="cancelCurrentJob"
                 @dragover="onReferenceDragover" @drop="onReferenceDrop">
                 <template #inputs>
                     <ReferenceInputs :form="form" :mode="generationMode" :features="generationFeatures"

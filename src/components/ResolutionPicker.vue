@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ASPECT_RATIOS, alignDimension, alignDimensions, aspectLabel, dimensionError, dimensionsForResolution, resolutionPresets } from "../lib/resolution";
-import type { Dimensions } from "../lib/resolution";
+import type { Dimensions, InputResolution } from "../lib/resolution";
 import type { Capabilities, GenerationMode } from "../lib/types";
 
 const props = defineProps<{
@@ -11,8 +11,13 @@ const props = defineProps<{
     limits?: Capabilities["limits"];
     sizeMultiple: number;
     recommended: Dimensions;
+    inputResolution: InputResolution | null;
+    followingInputSize: boolean;
 }>();
-const emit = defineEmits<{ (event: "change", size: Dimensions): void }>();
+const emit = defineEmits<{
+    (event: "change", size: Dimensions): void;
+    (event: "follow-input-size"): void;
+}>();
 const locked = ref(false);
 const ratio = ref(1);
 const tier = ref("custom");
@@ -22,6 +27,7 @@ const size = computed(() => ({ width: props.width, height: props.height }));
 const error = computed(() => dimensionError(size.value, props.limits, props.sizeMultiple));
 const recommendedSize = computed(() => alignDimensions(props.recommended, props.sizeMultiple));
 const selectedTier = computed(() => {
+    if (props.followingInputSize && props.inputResolution) return "input";
     if (tier.value === "model-default" && (props.width !== recommendedSize.value.width || props.height !== recommendedSize.value.height)) return "custom";
     return tier.value;
 });
@@ -101,6 +107,11 @@ function recommend(): void {
     commit(recommendedSize.value, "model-default");
 }
 
+function followInput(): void {
+    ratioError.value = "";
+    emit("follow-input-size");
+}
+
 function correctSize(): void {
     if (!correctedSize.value) return;
     const next = correctedSize.value;
@@ -125,6 +136,10 @@ function correctSize(): void {
     <section aria-labelledby="resolution-heading">
         <div class="resolution-heading"><h3 id="resolution-heading">Resolution</h3></div>
         <div class="resolution-options">
+            <button v-if="inputResolution" class="resolution-option" type="button" :aria-pressed="selectedTier === 'input'" @click="followInput">
+                <strong>Follow input image</strong>
+                <span>{{ inputResolution.label }} · {{ inputResolution.size.width }} × {{ inputResolution.size.height }}</span>
+            </button>
             <button class="resolution-option" type="button" :aria-pressed="selectedTier === 'model-default'" :disabled="Boolean(dimensionError(recommendedSize, limits, sizeMultiple))" @click="recommend">
                 <strong>Model default</strong><span>{{ recommendedSize.width }} × {{ recommendedSize.height }}</span>
             </button>

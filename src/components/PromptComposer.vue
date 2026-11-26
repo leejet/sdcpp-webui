@@ -5,7 +5,7 @@ import ChevronIcon from "./ChevronIcon.vue";
 import ResolutionPicker from "./ResolutionPicker.vue";
 import { aspectLabel, dimensionError } from "../lib/resolution";
 import { createStoredRef } from "../lib/settings";
-import type { Dimensions } from "../lib/resolution";
+import type { Dimensions, InputResolution } from "../lib/resolution";
 import type { PromptEnhancement } from "../lib/prompt-enhancement";
 import type { Capabilities, GenerationForm, GenerationMode } from "../lib/types";
 
@@ -22,8 +22,11 @@ const props = defineProps<{
     hasLoras: boolean;
     loraCount: number;
     limits?: Capabilities["limits"];
+    size: Dimensions;
     sizeMultiple: number;
     recommended: Dimensions;
+    inputResolution: InputResolution | null;
+    followingInputSize: boolean;
     videoSummary: string;
     videoDetails: string;
 }>();
@@ -31,6 +34,8 @@ const emit = defineEmits<{
     (event: "generate"): void;
     (event: "cancel"): void;
     (event: "enhancement-settings"): void;
+    (event: "resize", size: Dimensions): void;
+    (event: "follow-input-size"): void;
 }>();
 const activePanel = ref("");
 const panelAnchor = shallowRef<HTMLElement | null>(null);
@@ -40,8 +45,7 @@ const negativeExpanded = createStoredRef<boolean>("sdcpp-webui-negative-prompt-e
 const negativeSummary = computed(() => props.form.negative_prompt.replace(/\s+/g, " ").trim());
 const showNegativePrompt = computed(() => props.form.sample_params.guidance.txt_cfg !== 1);
 const titles: Record<string, string> = { models: "Model", resolution: "Aspect Ratio & Resolution", output: "Output", lora: "LoRA", sample: "Sample & Guidance", advanced: "More settings" };
-const size = computed(() => ({ width: props.form.width, height: props.form.height }));
-const sizeError = computed(() => dimensionError(size.value, props.limits, props.sizeMultiple));
+const sizeError = computed(() => dimensionError(props.size, props.limits, props.sizeMultiple));
 const buttonLabel = computed(() => props.busy ? "Generating…" : "Generate");
 const seedLabel = computed(() => props.form.seed < 0 ? "Random" : String(props.form.seed));
 const seedSummary = computed(() => seedLabel.value.length > 10
@@ -60,11 +64,6 @@ const samplingTitle = computed(() => {
 function open(panel: string, event?: MouseEvent, toggle = true): void {
     panelAnchor.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     activePanel.value = toggle && activePanel.value === panel ? "" : panel;
-}
-
-function setSize(next: Dimensions): void {
-    props.form.width = next.width;
-    props.form.height = next.height;
 }
 
 function submit(event?: KeyboardEvent): void {
@@ -119,7 +118,9 @@ defineExpose({
         <ComposerPanel :anchor="panelAnchor" :centered="activePanel === 'models' || activePanel === 'lora'" :min-height="activePanel === 'lora' ? 420 : undefined" :open="Boolean(activePanel)" :title="titles[activePanel] || 'Settings'" @close="activePanel = ''">
             <div v-show="activePanel === 'models'"><slot name="models" /></div>
             <div v-show="activePanel === 'resolution'">
-                <ResolutionPicker :width="form.width" :height="form.height" :mode="mode" :limits="limits" :size-multiple="sizeMultiple" :recommended="recommended" @change="setSize" />
+                <ResolutionPicker :width="size.width" :height="size.height" :mode="mode" :limits="limits" :size-multiple="sizeMultiple" :recommended="recommended"
+                    :input-resolution="inputResolution" :following-input-size="followingInputSize"
+                    @change="emit('resize', $event)" @follow-input-size="emit('follow-input-size')" />
             </div>
             <div v-show="activePanel === 'output'"><slot name="output" /></div>
             <div v-show="activePanel === 'lora'"><slot name="lora" /></div>
@@ -170,7 +171,7 @@ defineExpose({
             <div class="composer-toolbar__options">
                 <button class="composer-chip composer-chip--model" type="button" :aria-expanded="activePanel === 'models'" aria-controls="composer-panel" @click="open('models', $event)"><span class="model-dot" :class="{ 'model-dot--ready': modelSelected }" aria-hidden="true"></span><span>{{ modelLabel }}</span><ChevronIcon class="composer-chevron" /></button>
                 <button v-if="hasLoras" class="composer-chip" type="button" :aria-expanded="activePanel === 'lora'" aria-controls="composer-panel" @click="open('lora', $event)">LoRA<span v-if="loraCount"> · {{ loraCount }}</span></button>
-                <button class="composer-chip" type="button" aria-label="Aspect Ratio and Resolution" :aria-expanded="activePanel === 'resolution'" aria-controls="composer-panel" @click="open('resolution', $event)"><span class="toolbar-ratio" aria-hidden="true"></span>{{ aspectLabel(size, sizeMultiple) }} · {{ sizeError ? 'Custom size' : `${form.width} × ${form.height}` }} <ChevronIcon class="composer-chevron" /></button>
+                <button class="composer-chip" type="button" aria-label="Aspect Ratio and Resolution" :aria-expanded="activePanel === 'resolution'" aria-controls="composer-panel" @click="open('resolution', $event)"><span class="toolbar-ratio" aria-hidden="true"></span>{{ aspectLabel(size, sizeMultiple) }} · {{ sizeError ? 'Custom size' : `${size.width} × ${size.height}` }} <ChevronIcon class="composer-chevron" /></button>
                 <button class="composer-chip composer-chip--sample" type="button" :title="samplingTitle" :aria-label="`Sample & Guidance. ${samplingTitle}`" :aria-expanded="activePanel === 'sample'" aria-controls="composer-panel" @click="open('sample', $event)"><span class="composer-chip__summary">{{ samplingSummary }}</span><ChevronIcon class="composer-chevron" /></button>
                 <button class="composer-chip" type="button" :aria-label="`${mode === 'image' ? 'Number of images and seed' : videoDetails}. Seed: ${seedLabel}`" :title="`${mode === 'video' ? `${videoDetails}; ` : ''}Seed: ${seedLabel}`" :aria-expanded="activePanel === 'output'" aria-controls="composer-panel" @click="open('output', $event)">{{ mode === 'image' ? `${form.batch_count} image${form.batch_count === 1 ? '' : 's'}` : videoSummary }} · {{ seedSummary }} <ChevronIcon class="composer-chevron" /></button>
                 <button class="composer-chip" type="button" :aria-expanded="activePanel === 'advanced'" aria-controls="composer-panel" @click="open('advanced', $event)">More <span aria-hidden="true">···</span></button>

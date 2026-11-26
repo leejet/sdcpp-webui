@@ -1,6 +1,7 @@
 import type { Capabilities, GenerationMode } from "./types";
 
 export interface Dimensions { width: number; height: number }
+export interface InputResolution { size: Dimensions; label: "Init image" | "Reference image" }
 export interface ResolutionPreset { id: string; label: string; value: number }
 
 export const ASPECT_RATIOS = [
@@ -35,6 +36,23 @@ export function alignDimension(value: number, multiple = 8): number {
 
 export function alignDimensions(size: Dimensions, multiple = 8): Dimensions {
     return { width: alignDimension(size.width, multiple), height: alignDimension(size.height, multiple) };
+}
+
+export function fitInputDimensions(size: Dimensions, limits?: Capabilities["limits"], multiple = 8): Dimensions {
+    const step = sizeMultiple(multiple);
+    const min = alignDimensions({ width: limits?.min_width ?? 64, height: limits?.min_height ?? 64 }, step);
+    const max = {
+        width: Math.floor((limits?.max_width ?? 4096) / step) * step,
+        height: Math.floor((limits?.max_height ?? 4096) / step) * step,
+    };
+    const minScale = Math.max(min.width / size.width, min.height / size.height);
+    const maxScale = Math.min(max.width / size.width, max.height / size.height);
+    const scale = Math.min(maxScale, Math.max(1, minScale));
+    const aligned = alignDimensions({ width: size.width * scale, height: size.height * scale }, step);
+    return {
+        width: Math.min(max.width, Math.max(min.width, aligned.width)),
+        height: Math.min(max.height, Math.max(min.height, aligned.height)),
+    };
 }
 
 export function dimensionsForResolution(ratio: number, value: number, mode: GenerationMode, multiple = 8): Dimensions {
