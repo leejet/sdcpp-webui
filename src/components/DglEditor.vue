@@ -6,12 +6,14 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { createAviPreview } from "../lib/avi-preview";
 import { fetchServerMedia, mediaViewUrl, readServerApiKey } from "../lib/api";
 import { connectNativePlayback, createExpandButton, createPlaybackPicture } from "../lib/media-preview";
+import type { MediaOutput } from "../lib/types";
 
 const props = defineProps<{
     modelValue: string;
     documentRevision: number;
     readOnly: boolean;
     mediaView: boolean;
+    mediaOutput?: MediaOutput;
     outputRevision: number;
 }>();
 const emit = defineEmits<{
@@ -21,11 +23,11 @@ const emit = defineEmits<{
 }>();
 
 type MediaKind = "image" | "video" | "avi";
-type MediaPath = { root: string; path: string; kind: MediaKind };
+type MediaPath = { root: string; path: string; label: string; kind: MediaKind };
 type MediaPreview = { path: string; url: string; kind: MediaKind; output: boolean };
 type ExpandedVideo = { kind: "video" | "avi"; url: string; path: string; position: number };
 type RenderedMedia = { load(preflight?: Response): void; destroy(): void };
-type MediaOptions = { enabled: boolean; outputRevision: number };
+type MediaOptions = { enabled: boolean; output?: MediaOutput; outputRevision: number };
 type PreviewSize = { width: number; height: number };
 
 const host = ref<HTMLElement>();
@@ -64,20 +66,39 @@ watch(expandedHost, (host, _, onCleanup) => {
     player.load();
 });
 
-function parseMediaPath(literal: string): MediaPath | undefined {
+function outputRelativePath(value: string, output?: MediaOutput): string | undefined {
+    for (const directory of output?.paths ?? ["output"]) {
+        if (directory === ".") {
+            if (!value.startsWith("/") && !/^[a-z]:/i.test(value)) return value;
+            continue;
+        }
+        const prefix = directory.endsWith("/") ? directory : directory + "/";
+        const start = value.slice(0, prefix.length);
+        if (output?.case_insensitive ? start.toLowerCase() === prefix.toLowerCase() : start === prefix) {
+            return value.slice(prefix.length);
+        }
+    }
+}
+
+function parseMediaPath(literal: string, output?: MediaOutput): MediaPath | undefined {
     let value: string;
     try {
         value = JSON.parse(literal);
     } catch {
         return;
     }
-    const match = /^(?:\.\/)?(input|output|assets)\/(.+)$/.exec(value.replace(/\\/g, "/"));
-    if (!match) return;
-    const [, root, path] = match;
+    const label = value.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+    let root = "output";
+    let path = outputRelativePath(label, output);
+    if (path === undefined) {
+        const match = /^(input|assets)\/(.+)$/.exec(label);
+        if (!match) return;
+        [, root, path] = match;
+    }
     if (path.split("/").some((part) => !part || /[. ]$/.test(part) || /[:*?"<>|\x00-\x1f\x7f]/.test(part))) return;
-    if (/\.avi$/i.test(path)) return { root, path, kind: "avi" };
-    if (/\.(mp4|webm)$/i.test(path)) return { root, path, kind: "video" };
-    if (/\.(png|jpe?g|gif|webp)$/i.test(path)) return { root, path, kind: "image" };
+    if (/\.avi$/i.test(path)) return { root, path, label, kind: "avi" };
+    if (/\.(mp4|webm)$/i.test(path)) return { root, path, label, kind: "video" };
+    if (/\.(png|jpe?g|gif|webp)$/i.test(path)) return { root, path, label, kind: "image" };
 }
 
 class MediaWidget extends WidgetType {
@@ -312,7 +333,7 @@ function scanSource(doc: Text, options: MediaOptions) {
         if (!kind) continue;
         marks.push(Decoration.mark({ class: "dgl-token-" + kind }).range(from, to));
         if (!options.enabled || kind !== "string") continue;
-        const file = parseMediaPath(match[0]);
+        const file = parseMediaPath(match[0], options.output);
         if (!file) continue;
 
         marks.push(Decoration.mark({ class: "dgl-media-path" }).range(from + 1, to - 1));
@@ -324,7 +345,7 @@ function scanSource(doc: Text, options: MediaOptions) {
             rows.set(line.to, row);
         }
         row.files.push({
-            path: file.root + "/" + file.path,
+            path: file.label,
             kind: file.kind,
             output: file.root === "output",
             url: mediaViewUrl(file.root, file.path, file.root === "output" ? options.outputRevision : 0),
@@ -337,7 +358,7 @@ function scanSource(doc: Text, options: MediaOptions) {
 }
 
 function mediaOptions(): MediaOptions {
-    return { enabled: props.mediaView, outputRevision: props.outputRevision };
+    return { enabled: props.mediaView, output: props.mediaOutput, outputRevision: props.outputRevision };
 }
 
 const sourceMarkup = StateField.define({
@@ -383,7 +404,7 @@ watch([() => props.documentRevision, () => props.modelValue], ([revision, text],
 watch(() => props.readOnly, (value) => {
     view?.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(value)) });
 });
-watch([() => props.mediaView, () => props.outputRevision], () => {
+watch([() => props.mediaView, () => props.mediaOutput, () => props.outputRevision], () => {
     view?.dispatch({ effects: setMediaOptions.of(mediaOptions()) });
     if (!props.mediaView) videoDialog.value?.close();
 });

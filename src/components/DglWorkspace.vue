@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { getCapabilities, getJob, listDglScripts, loadDglScript, saveDglScript, submitDglJob } from "../lib/api";
 import { createStoredRef } from "../lib/settings";
-import type { DglJob } from "../lib/types";
+import type { DglJob, MediaOutput } from "../lib/types";
 import DglEditor from "./DglEditor.vue";
 import GenerationProgress from "./GenerationProgress.vue";
 
@@ -34,6 +34,7 @@ const documentRevision = ref(0);
 let runAbort: AbortController | undefined;
 
 const mediaAllowed = ref(false);
+const mediaOutput = ref<MediaOutput>();
 const mediaEnabled = createStoredRef("sdcpp-webui-dgl-media-view", true, (value: unknown) => value !== false);
 const canViewMedia = computed(() => props.active && mediaAllowed.value && mediaEnabled.value);
 const outputRevision = ref(0);
@@ -192,9 +193,12 @@ async function runScript(): Promise<void> {
 
 watch(() => props.serverAuthRevision, (revision) => {
     mediaAllowed.value = false;
+    mediaOutput.value = undefined;
     void refreshFiles(true);
     void getCapabilities("").then((response) => {
-        if (props.serverAuthRevision === revision) mediaAllowed.value = response.media_view === true;
+        if (props.serverAuthRevision !== revision) return;
+        mediaAllowed.value = response.media_view === true;
+        mediaOutput.value = response.media_output;
     }, () => {});
 }, { immediate: true });
 onBeforeUnmount(() => runAbort?.abort());
@@ -238,7 +242,8 @@ onBeforeUnmount(() => runAbort?.abort());
             <p v-if="fileError && !namingFile" class="status-message status-message--error" role="alert">{{ fileError }}</p>
             <p v-if="runError || job?.error" class="status-message status-message--error" role="alert">{{ runError || job?.error?.message }}</p>
             <DglEditor ref="editor" v-model="source" :document-revision="documentRevision" :read-only="busy"
-                :media-view="canViewMedia" :output-revision="outputRevision" @save="saveCurrentScript" @save-as="showSaveAs" @run="runScript"
+                :media-view="canViewMedia" :media-output="mediaOutput" :output-revision="outputRevision"
+                @save="saveCurrentScript" @save-as="showSaveAs" @run="runScript"
                 @expand-image="(src, alt) => emit('expand-image', src, alt)" />
             <GenerationProgress v-if="active && job" class="dgl-progress" :job="job" show-finished-progress>
                 <template #actions>

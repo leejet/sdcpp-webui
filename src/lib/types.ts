@@ -139,10 +139,16 @@ export interface AvailableLora {
 
 export type GenerationFeatures = Record<string, boolean>;
 
+export interface MediaOutput {
+  paths: string[];
+  case_insensitive?: boolean;
+}
+
 export interface Capabilities {
   generation_features?: GenerationFeatures;
   generation_model_selection?: boolean;
   media_view?: boolean;
+  media_output?: MediaOutput;
   runtime?: ModelStatus;
   model?: {
     stem?: string;
